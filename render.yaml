@@ -1,0 +1,15 @@
+services:
+  - type: worker
+    name: anagram-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    disk:
+      name: bot-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false          # à renseigner manuellement dans le dashboard Render
+      - key: DB_PATH
+        value: /data/anagram.db
