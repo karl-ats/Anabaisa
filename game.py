@@ -1,11 +1,14 @@
 import asyncio
 import random
 import time
-from datetime import datetime, timezone
+import unicodedata
+from datetime import datetime
+
+import pytz
 
 from config import (
     DELAY_TAUNT, HINT_SCHEDULE, SOLUTION_DELAY,
-    TOURNAMENT_ROUNDS, POINTS, BONUS_SPEED_SECONDS
+    TOURNAMENT_ROUNDS, POINTS, BONUS_SPEED_SECONDS, TIMEZONE
 )
 import database as db
 import messages as msg
@@ -59,7 +62,6 @@ def give_hint(chat_id: int):
 
 def nettoyer(texte: str) -> str:
     """Normalise accents et casse pour la comparaison."""
-    import unicodedata
     texte = texte.strip().lower()
     return unicodedata.normalize("NFD", texte).encode("ascii", "ignore").decode()
 
@@ -92,10 +94,11 @@ async def start_round(
     mode: str = "quick",
     manche: int = 1,
     scores_tournoi: dict = None,
+    mot: str = None,
 ):
-    mot      = get_word(difficulte)
-    anag     = melanger(mot)
-    loop     = asyncio.get_event_loop()
+    if mot is None:
+        mot = get_word(difficulte)
+    anag = melanger(mot)
 
     await _cancel_tasks(chat_id)
 
@@ -124,7 +127,7 @@ def start_tasks(chat_id: int, bot):
     diff = game["difficulte"]
     sol_delay   = SOLUTION_DELAY.get(diff, 60)
     hint_delays = HINT_SCHEDULE.get(diff, [15])
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     tasks = [loop.create_task(_taunt_task(chat_id, bot))]
     for delay in hint_delays:
         tasks.append(loop.create_task(_hint_task(chat_id, bot, delay)))
@@ -196,10 +199,12 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
     # Badges
     if stats["serie"] >= 5:
         db.add_badge(user_id, "⚡ Foudre de guerre")
-    hour = datetime.now(timezone.utc).hour + 1  # UTC+1
+    tz = pytz.timezone(TIMEZONE)
+    hour = datetime.now(tz).hour
     if 0 <= hour < 5:
         db.add_badge(user_id, "🌙 Noctambule")
-    if elapsed < DELAY_HINT:
+    first_hint_delay = HINT_SCHEDULE.get(difficulte, [15])[0]
+    if elapsed < first_hint_delay:
         db.add_badge(user_id, "🎯 Sans indice")
 
     await bot.send_message(
