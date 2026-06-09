@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from contextlib import contextmanager
 from config import DB_PATH, LEVELS
@@ -9,6 +10,9 @@ def get_conn():
     try:
         yield conn
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -22,8 +26,8 @@ def init_db():
                 pts_alltime INTEGER DEFAULT 0,
                 pts_hebdo   INTEGER DEFAULT 0,
                 victoires   INTEGER DEFAULT 0,
-                serie       INTEGER DEFAULT 0,   -- victoires consécutives
-                badges      TEXT    DEFAULT ''    -- JSON list
+                serie       INTEGER DEFAULT 0,
+                badges      TEXT    DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS parties (
@@ -38,7 +42,7 @@ def init_db():
 
             CREATE TABLE IF NOT EXISTS defi_du_jour (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                date        TEXT NOT NULL UNIQUE,   -- YYYY-MM-DD
+                date        TEXT NOT NULL UNIQUE,
                 mot         TEXT NOT NULL,
                 difficulte  TEXT NOT NULL,
                 gagnant_id  TEXT,
@@ -50,7 +54,14 @@ def init_db():
                 last_reset  DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS chats_enregistres (
+                chat_id     INTEGER PRIMARY KEY
+            );
+
             INSERT OR IGNORE INTO hebdo_reset (id) VALUES (1);
+
+            CREATE INDEX IF NOT EXISTS idx_pts_hebdo   ON joueurs(pts_hebdo   DESC);
+            CREATE INDEX IF NOT EXISTS idx_pts_alltime ON joueurs(pts_alltime DESC);
         """)
 
 # ── Joueurs ─────────────────────────────────────────────────────
@@ -61,25 +72,23 @@ def get_niveau(pts: int) -> str:
             niveau = label
     return niveau
 
-def upsert_joueur(user_id: str, name: str):
+def get_joueur_name(user_id: str) -> str:
     with get_conn() as conn:
-        conn.execute("""
-            INSERT INTO joueurs (user_id, name)
-            VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET name = excluded.name
-        """, (user_id, name))
+        row = conn.execute("SELECT name FROM joueurs WHERE user_id = ?", (user_id,)).fetchone()
+    return row["name"] if row else "Inconnu"
 
 def add_points(user_id: str, name: str, pts: int) -> dict:
-    upsert_joueur(user_id, name)
     with get_conn() as conn:
         conn.execute("""
-            UPDATE joueurs
-            SET pts_alltime = pts_alltime + ?,
+            INSERT INTO joueurs (user_id, name, pts_alltime, pts_hebdo, victoires, serie)
+            VALUES (?, ?, ?, ?, 1, 1)
+            ON CONFLICT(user_id) DO UPDATE SET
+                name        = excluded.name,
+                pts_alltime = pts_alltime + ?,
                 pts_hebdo   = pts_hebdo   + ?,
                 victoires   = victoires   + 1,
                 serie       = serie       + 1
-            WHERE user_id = ?
-        """, (pts, pts, user_id))
+        """, (user_id, name, pts, pts, pts, pts))
         row = conn.execute(
             "SELECT pts_alltime, pts_hebdo, serie FROM joueurs WHERE user_id = ?",
             (user_id,)
@@ -92,12 +101,10 @@ def add_points(user_id: str, name: str, pts: int) -> dict:
     }
 
 def reset_serie(user_id: str):
-    """Appelé quand un joueur rate (optionnel, non utilisé en mode groupe)."""
     with get_conn() as conn:
         conn.execute("UPDATE joueurs SET serie = 0 WHERE user_id = ?", (user_id,))
 
 def add_badge(user_id: str, badge: str):
-    import json
     with get_conn() as conn:
         row = conn.execute("SELECT badges FROM joueurs WHERE user_id = ?", (user_id,)).fetchone()
         if not row:
@@ -144,6 +151,18 @@ def reset_hebdo():
     with get_conn() as conn:
         conn.execute("UPDATE joueurs SET pts_hebdo = 0")
         conn.execute("UPDATE hebdo_reset SET last_reset = CURRENT_TIMESTAMP WHERE id = 1")
+
+# ── Chats enregistrés ────────────────────────────────────────────
+def save_chat(chat_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO chats_enregistres (chat_id) VALUES (?)", (chat_id,)
+        )
+
+def get_all_chats() -> list[int]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT chat_id FROM chats_enregistres").fetchall()
+    return [r["chat_id"] for r in rows]
 
 # ── Défi du jour ─────────────────────────────────────────────────
 def save_defi(date: str, mot: str, difficulte: str):

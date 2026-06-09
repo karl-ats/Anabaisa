@@ -185,6 +185,7 @@ def main():
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
+    app.add_handler(CommandHandler("start",       cmd_start))
     app.add_handler(CommandHandler("startAna",    cmd_start))
     app.add_handler(CommandHandler("starteasy",   cmd_starteasy))
     app.add_handler(CommandHandler("startmedium", cmd_startmedium))

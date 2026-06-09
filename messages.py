@@ -131,7 +131,8 @@ def msg_defi_du_jour(anagramme: str, difficulte: str, nb_lettres: int) -> str:
         f"🌅 *DÉFI DU JOUR !*\n\n"
         f"➡️  *{anagramme.upper()}*\n\n"
         f"📏 {nb_lettres} lettres · {labels[difficulte]} · *{pts} pt{'s' if pts > 1 else ''}*\n\n"
-        f"_Soyez le premier à trouver ce mot ! Indice dans 10s · Solution dans 30s._"
+        f"_({hint_timing_str(difficulte)})_\n\n"
+        f"Soyez le premier à trouver ce mot !"
     )
 
 def msg_vainqueur_jour(nom: str, mot: str, pts: int) -> str:
