@@ -1,5 +1,5 @@
 import random
-from config import POINTS, BONUS_SPEED_SECONDS
+from config import POINTS, BONUS_SPEED_SECONDS, hint_timing_str
 
 # ── Relances taquines ───────────────────────────────────────────
 TAUNTS = [
@@ -48,7 +48,7 @@ def msg_nouvelle_partie(anagramme: str, difficulte: str, nb_lettres: int) -> str
         f"🔤 *Nouvelle anagramme !*\n\n"
         f"➡️  *{anagramme.upper()}*\n\n"
         f"📏 {nb_lettres} lettres · {labels[difficulte]} · *{pts} pt{'s' if pts > 1 else ''}*\n"
-        f"_(Indice dans 10s · Solution dans 30s)_"
+        f"_({hint_timing_str(difficulte)})_"
     )
 
 # ── Message indice ──────────────────────────────────────────────
@@ -83,7 +83,7 @@ def msg_manche(numero: int, total: int, anagramme: str, difficulte: str, nb_lett
         f"🎯 *Manche {numero}/{total}*\n\n"
         f"➡️  *{anagramme.upper()}*\n\n"
         f"📏 {nb_lettres} lettres · {labels[difficulte]} · *{pts} pt{'s' if pts > 1 else ''}*\n"
-        f"_(Indice dans 10s · Solution dans 30s)_"
+        f"_({hint_timing_str(difficulte)})_"
     )
 
 def msg_fin_tournoi(scores_tournoi: dict) -> str:

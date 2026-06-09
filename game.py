@@ -4,7 +4,7 @@ import time
 from datetime import datetime, timezone
 
 from config import (
-    DELAY_TAUNT, DELAY_HINT, DELAY_SOLUTION,
+    DELAY_TAUNT, HINT_SCHEDULE, SOLUTION_DELAY,
     TOURNAMENT_ROUNDS, POINTS, BONUS_SPEED_SECONDS
 )
 import database as db
@@ -117,14 +117,19 @@ async def start_round(
 
 def start_tasks(chat_id: int, bot):
     """Démarre les timers APRÈS que le message initial a été envoyé avec succès."""
-    if chat_id not in GAMES:
+    game = GAMES.get(chat_id)
+    if not game:
         return
-    GAMES[chat_id]["start_time"] = time.time()
+    game["start_time"] = time.time()
+    diff = game["difficulte"]
+    sol_delay   = SOLUTION_DELAY.get(diff, 60)
+    hint_delays = HINT_SCHEDULE.get(diff, [15])
     loop = asyncio.get_event_loop()
-    t1 = loop.create_task(_taunt_task(chat_id, bot))
-    t2 = loop.create_task(_hint_task(chat_id, bot))
-    t3 = loop.create_task(_solution_task(chat_id, bot))
-    GAMES[chat_id]["tasks"] = [t1, t2, t3]
+    tasks = [loop.create_task(_taunt_task(chat_id, bot))]
+    for delay in hint_delays:
+        tasks.append(loop.create_task(_hint_task(chat_id, bot, delay)))
+    tasks.append(loop.create_task(_solution_task(chat_id, bot, sol_delay)))
+    game["tasks"] = tasks
 
 # ── Tâches chronométrées ─────────────────────────────────────────
 async def _taunt_task(chat_id: int, bot):
@@ -132,8 +137,8 @@ async def _taunt_task(chat_id: int, bot):
     if GAMES.get(chat_id, {}).get("actif"):
         await bot.send_message(chat_id, msg.msg_relance(), parse_mode="Markdown")
 
-async def _hint_task(chat_id: int, bot):
-    await asyncio.sleep(DELAY_HINT)
+async def _hint_task(chat_id: int, bot, delay: int = 15):
+    await asyncio.sleep(delay)
     if not GAMES.get(chat_id, {}).get("actif"):
         return
     result = give_hint(chat_id)
@@ -146,8 +151,8 @@ async def _hint_task(chat_id: int, bot):
             parse_mode="Markdown"
         )
 
-async def _solution_task(chat_id: int, bot):
-    await asyncio.sleep(DELAY_SOLUTION)
+async def _solution_task(chat_id: int, bot, delay: int = 60):
+    await asyncio.sleep(delay)
     game = GAMES.get(chat_id, {})
     if not game.get("actif"):
         return
