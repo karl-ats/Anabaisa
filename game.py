@@ -160,9 +160,10 @@ async def _solution_task(chat_id: int, bot, delay: int = 60):
     mode = game["mode"]
     GAMES[chat_id]["actif"] = False
 
-    # Annuler les autres tâches (taunt/hint) pour éviter les doublons
+    # Annuler les AUTRES tâches (taunt/hint) — ne pas s'annuler soi-même
+    current = asyncio.current_task()
     for t in game.get("tasks", []):
-        if not t.done():
+        if not t.done() and t is not current:
             t.cancel()
 
     await bot.send_message(chat_id, msg.msg_solution(mot, "timeout", mode), parse_mode="Markdown")
