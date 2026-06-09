@@ -52,8 +52,8 @@ def msg_nouvelle_partie(anagramme: str, difficulte: str, nb_lettres: int) -> str
     )
 
 # ── Message indice ──────────────────────────────────────────────
-def msg_indice(masque: str, nb_lettres: int) -> str:
-    return f"💡 *Indice :* `{masque}`  ({nb_lettres} lettres)"
+def msg_indice(masque: str, nb_lettres: int, count: int = 1, max_h: int = 1) -> str:
+    return f"💡 *Indice {count}/{max_h} :* `{masque}`  ({nb_lettres} lettres)"
 
 # ── Message solution ────────────────────────────────────────────
 def msg_solution(mot: str, raison: str = "timeout", mode: str = "quick") -> str:

@@ -117,38 +117,50 @@ async def cmd_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not game or not game.get("actif"):
         await update.message.reply_text("❌ Aucune partie en cours. Tapez /starteasy !")
         return
-    mot = game["mot"]
+    result = g.give_hint(chat_id)
+    if result is None:
+        max_h = g.MAX_HINTS.get(game["difficulte"], 1)
+        await update.message.reply_text(
+            f"🚫 Maximum d'indices atteint ({max_h}/{max_h}). Cherche encore ! 😏"
+        )
+        return
+    masque, count, max_h = result
     await update.message.reply_text(
-        msg.msg_indice(g.masque_indice(mot), len(mot)),
+        msg.msg_indice(masque, len(game["mot"]), count, max_h),
         parse_mode="Markdown"
     )
 
 async def cmd_solution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    mot, was_active = await g.stop_game(chat_id)
-    if mot is None:
+    info = await g.stop_game(chat_id)
+    if info is None:
         await update.message.reply_text("❌ Aucune partie en cours.")
         return
     await update.message.reply_text(
-        msg.msg_solution(mot, "manual"),
+        msg.msg_solution(info["mot"], "manual", info["mode"]),
         parse_mode="Markdown"
     )
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    mot, was_active = await g.stop_game(chat_id)
-    if mot is None:
+    info = await g.stop_game(chat_id)
+    if info is None:
         await update.message.reply_text("❌ Aucune partie en cours.")
         return
-    if not was_active:
-        await update.message.reply_text(
-            "ℹ️ La partie s'est terminée toute seule (temps écoulé)."
-        )
-        return
+    mot    = info["mot"]
+    mode   = info["mode"]
+    scores = info["scores_tournoi"]
+    # Toujours montrer le mot (que la partie soit encore active ou déjà expirée)
     await update.message.reply_text(
-        msg.msg_solution(mot, "stop"),
+        msg.msg_solution(mot, "stop", mode),
         parse_mode="Markdown"
     )
+    # Si c'était un tournoi, afficher le bilan des scores
+    if mode == "tournament":
+        await update.message.reply_text(
+            msg.msg_fin_tournoi(scores),
+            parse_mode="Markdown"
+        )
 
 async def cmd_scores(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hebdo   = db.get_classement_hebdo()

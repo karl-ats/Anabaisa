@@ -20,11 +20,42 @@ def melanger(mot: str) -> str:
             return "".join(lettres)
     return "".join(reversed(mot))
 
-def masque_indice(mot: str) -> str:
+MAX_HINTS = {"easy": 1, "medium": 2, "hard": 3}
+
+def masque_indice(mot: str, revealed: set) -> str:
+    """Construit le masque d'indice selon les positions révélées."""
+    return " ".join(mot[i] if i in revealed else "_" for i in range(len(mot)))
+
+def _init_revealed(mot: str) -> set:
+    """Premier indice : première et dernière lettre."""
     if len(mot) <= 2:
-        return mot
-    milieu = "_ " * (len(mot) - 2)
-    return f"{mot[0]} {milieu}{mot[-1]}"
+        return set(range(len(mot)))
+    return {0, len(mot) - 1}
+
+def _next_revealed(mot: str, current: set) -> set:
+    """Ajoute 1-2 lettres aléatoires du milieu non encore révélées."""
+    middle = [i for i in range(1, len(mot) - 1) if i not in current]
+    if not middle:
+        return current
+    count = min(2, len(middle))
+    return current | set(random.sample(middle, count))
+
+def give_hint(chat_id: int):
+    """Avance d'un cran l'indice et retourne (masque, hint_count, max_hints) ou None si max atteint."""
+    game = GAMES.get(chat_id)
+    if not game or not game.get("actif"):
+        return None
+    diff    = game["difficulte"]
+    max_h   = MAX_HINTS.get(diff, 1)
+    count   = game["hint_count"]
+    if count >= max_h:
+        return None
+    mot      = game["mot"]
+    revealed = game["revealed_positions"]
+    revealed = _init_revealed(mot) if count == 0 else _next_revealed(mot, revealed)
+    game["revealed_positions"] = revealed
+    game["hint_count"] = count + 1
+    return masque_indice(mot, revealed), count + 1, max_h
 
 def nettoyer(texte: str) -> str:
     """Normalise accents et casse pour la comparaison."""
@@ -69,15 +100,17 @@ async def start_round(
     await _cancel_tasks(chat_id)
 
     GAMES[chat_id] = {
-        "mode":           mode,
-        "difficulte":     difficulte,
-        "mot":            mot,
-        "anagramme":      anag,
-        "actif":          True,
-        "start_time":     None,   # défini dans start_tasks, après envoi du message
-        "tasks":          [],
-        "manche":         manche,
-        "scores_tournoi": scores_tournoi or {},
+        "mode":              mode,
+        "difficulte":        difficulte,
+        "mot":               mot,
+        "anagramme":         anag,
+        "actif":             True,
+        "start_time":        None,   # défini dans start_tasks, après envoi du message
+        "tasks":             [],
+        "manche":            manche,
+        "scores_tournoi":    scores_tournoi or {},
+        "hint_count":        0,
+        "revealed_positions": set(),
     }
 
     return mot, anag
@@ -101,11 +134,15 @@ async def _taunt_task(chat_id: int, bot):
 
 async def _hint_task(chat_id: int, bot):
     await asyncio.sleep(DELAY_HINT)
-    if GAMES.get(chat_id, {}).get("actif"):
+    if not GAMES.get(chat_id, {}).get("actif"):
+        return
+    result = give_hint(chat_id)
+    if result:
+        masque, count, max_h = result
         mot = GAMES[chat_id]["mot"]
         await bot.send_message(
             chat_id,
-            msg.msg_indice(masque_indice(mot), len(mot)),
+            msg.msg_indice(masque, len(mot), count, max_h),
             parse_mode="Markdown"
         )
 
@@ -216,16 +253,18 @@ async def _next_manche_or_end(chat_id: int, bot):
         await _launch_manche(chat_id, difficulte, bot, manche + 1, scores)
 
 # ── Stop ─────────────────────────────────────────────────────────
-async def stop_game(chat_id: int) -> tuple[str | None, bool]:
-    """Retourne (mot, actif_au_moment_du_stop).
-    Si actif=False : la partie vient de se terminer toute seule (timeout).
-    Si None : aucune partie en mémoire."""
+async def stop_game(chat_id: int) -> dict | None:
+    """Retourne un dict avec mot, was_active, mode, scores_tournoi — ou None si aucune partie."""
     game = GAMES.get(chat_id)
     if not game:
-        return None, False
-    mot    = game["mot"]
-    was_active = game["actif"]
+        return None
+    result = {
+        "mot":            game["mot"],
+        "was_active":     game["actif"],
+        "mode":           game["mode"],
+        "scores_tournoi": dict(game.get("scores_tournoi", {})),
+    }
     game["actif"] = False
     await _cancel_tasks(chat_id)
     GAMES.pop(chat_id, None)
-    return mot, was_active
+    return result
