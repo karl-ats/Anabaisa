@@ -10,7 +10,7 @@ from config import DAILY_HOUR, DAILY_MINUTE, RESULT_HOUR, RESULT_MINUTE, TIMEZON
 import database as db
 import messages as msg
 from words import get_word
-from game import melanger, start_round
+from game import melanger, start_round, start_tasks
 
 # chat_ids enregistrés (rempli au démarrage ou via /register)
 REGISTERED_CHATS: set = set()
@@ -29,13 +29,13 @@ async def send_daily_challenge(bot):
 
     for chat_id in REGISTERED_CHATS:
         try:
+            await start_round(chat_id, difficulte, bot, mode="daily")
             await bot.send_message(
                 chat_id,
                 msg.msg_defi_du_jour(anag, difficulte, len(mot)),
                 parse_mode="Markdown"
             )
-            # Lance la partie en mode "daily" pour ce chat
-            await start_round(chat_id, difficulte, bot, mode="daily")
+            start_tasks(chat_id, bot)
         except Exception as e:
             print(f"[Scheduler] Erreur défi du jour chat {chat_id}: {e}")
 

@@ -74,19 +74,24 @@ async def start_round(
         "mot":            mot,
         "anagramme":      anag,
         "actif":          True,
-        "start_time":     time.time(),
+        "start_time":     None,   # défini dans start_tasks, après envoi du message
         "tasks":          [],
         "manche":         manche,
         "scores_tournoi": scores_tournoi or {},
     }
 
-    # Tâches automatiques
+    return mot, anag
+
+def start_tasks(chat_id: int, bot):
+    """Démarre les timers APRÈS que le message initial a été envoyé avec succès."""
+    if chat_id not in GAMES:
+        return
+    GAMES[chat_id]["start_time"] = time.time()
+    loop = asyncio.get_event_loop()
     t1 = loop.create_task(_taunt_task(chat_id, bot))
     t2 = loop.create_task(_hint_task(chat_id, bot))
     t3 = loop.create_task(_solution_task(chat_id, bot))
     GAMES[chat_id]["tasks"] = [t1, t2, t3]
-
-    return mot, anag
 
 # ── Tâches chronométrées ─────────────────────────────────────────
 async def _taunt_task(chat_id: int, bot):
@@ -194,6 +199,7 @@ async def _launch_manche(chat_id: int, difficulte: str, bot, manche: int, scores
         msg.msg_manche(manche, TOURNAMENT_ROUNDS, anag, difficulte, len(mot)),
         parse_mode="Markdown"
     )
+    start_tasks(chat_id, bot)
 
 async def _next_manche_or_end(chat_id: int, bot):
     game      = GAMES.get(chat_id, {})

@@ -69,6 +69,7 @@ async def cmd_starteasy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg.msg_nouvelle_partie(anag, "easy", len(mot)),
         parse_mode="Markdown"
     )
+    g.start_tasks(chat_id, context.bot)
 
 async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -80,6 +81,7 @@ async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg.msg_nouvelle_partie(anag, "medium", len(mot)),
         parse_mode="Markdown"
     )
+    g.start_tasks(chat_id, context.bot)
 
 async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -91,6 +93,7 @@ async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg.msg_nouvelle_partie(anag, "hard", len(mot)),
         parse_mode="Markdown"
     )
+    g.start_tasks(chat_id, context.bot)
 
 async def cmd_tournoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
