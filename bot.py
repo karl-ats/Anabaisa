@@ -122,8 +122,8 @@ async def cmd_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_solution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    mot     = await g.stop_game(chat_id)
-    if not mot:
+    mot, was_active = await g.stop_game(chat_id)
+    if mot is None:
         await update.message.reply_text("❌ Aucune partie en cours.")
         return
     await update.message.reply_text(
@@ -133,9 +133,14 @@ async def cmd_solution(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    mot     = await g.stop_game(chat_id)
-    if not mot:
+    mot, was_active = await g.stop_game(chat_id)
+    if mot is None:
         await update.message.reply_text("❌ Aucune partie en cours.")
+        return
+    if not was_active:
+        await update.message.reply_text(
+            "ℹ️ La partie s'est terminée toute seule (temps écoulé)."
+        )
         return
     await update.message.reply_text(
         msg.msg_solution(mot, "stop"),

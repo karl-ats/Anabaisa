@@ -113,7 +113,12 @@ async def _solution_task(chat_id: int, bot):
     mode = game["mode"]
     GAMES[chat_id]["actif"] = False
 
-    await bot.send_message(chat_id, msg.msg_solution(mot, "timeout"), parse_mode="Markdown")
+    # Annuler les autres tâches (taunt/hint) pour éviter les doublons
+    for t in game.get("tasks", []):
+        if not t.done():
+            t.cancel()
+
+    await bot.send_message(chat_id, msg.msg_solution(mot, "timeout", mode), parse_mode="Markdown")
 
     if mode == "tournament":
         await _next_manche_or_end(chat_id, bot)
@@ -151,7 +156,7 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
 
     await bot.send_message(
         chat_id,
-        msg.msg_victoire(user_name, mot, elapsed, pts_total, stats["pts_alltime"], stats["niveau"], bonus),
+        msg.msg_victoire(user_name, mot, elapsed, pts_total, stats["pts_alltime"], stats["niveau"], bonus, game["mode"]),
         parse_mode="Markdown"
     )
 
@@ -205,12 +210,16 @@ async def _next_manche_or_end(chat_id: int, bot):
         await _launch_manche(chat_id, difficulte, bot, manche + 1, scores)
 
 # ── Stop ─────────────────────────────────────────────────────────
-async def stop_game(chat_id: int) -> str | None:
+async def stop_game(chat_id: int) -> tuple[str | None, bool]:
+    """Retourne (mot, actif_au_moment_du_stop).
+    Si actif=False : la partie vient de se terminer toute seule (timeout).
+    Si None : aucune partie en mémoire."""
     game = GAMES.get(chat_id)
-    if not game or not game["actif"]:
-        return None
-    mot = game["mot"]
+    if not game:
+        return None, False
+    mot    = game["mot"]
+    was_active = game["actif"]
     game["actif"] = False
     await _cancel_tasks(chat_id)
     GAMES.pop(chat_id, None)
-    return mot
+    return mot, was_active

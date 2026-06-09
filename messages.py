@@ -27,16 +27,17 @@ def reaction_vitesse(secondes: float) -> str:
         return "😅 *Enfin !* On commençait à désespérer !"
 
 # ── Message victoire ────────────────────────────────────────────
-def msg_victoire(prenom: str, mot: str, secondes: float, points_gagnes: int, total: int, niveau: str, bonus: bool) -> str:
+def msg_victoire(prenom: str, mot: str, secondes: float, points_gagnes: int, total: int, niveau: str, bonus: bool, mode: str = "quick") -> str:
     reaction = reaction_vitesse(secondes)
     bonus_txt = f"\n🎁 *+1 bonus vitesse* (trouvé en moins de {BONUS_SPEED_SECONDS}s) !" if bonus else ""
+    suite = "" if mode in ("tournament", "daily") else "\n\nTapez /starteasy · /startmedium · /starthard pour continuer !"
     return (
         f"🎉 *{prenom}* a trouvé *{mot.upper()}* !\n"
         f"{reaction}\n"
         f"{bonus_txt}\n"
         f"💰 *+{points_gagnes} pt{'s' if points_gagnes > 1 else ''}* → Total : *{total} pts*\n"
-        f"🏅 Niveau : {niveau}\n\n"
-        f"Tapez /starteasy · /startmedium · /starthard pour continuer !"
+        f"🏅 Niveau : {niveau}"
+        f"{suite}"
     )
 
 # ── Message nouvelle partie ─────────────────────────────────────
@@ -55,14 +56,15 @@ def msg_indice(masque: str, nb_lettres: int) -> str:
     return f"💡 *Indice :* `{masque}`  ({nb_lettres} lettres)"
 
 # ── Message solution ────────────────────────────────────────────
-def msg_solution(mot: str, raison: str = "timeout") -> str:
+def msg_solution(mot: str, raison: str = "timeout", mode: str = "quick") -> str:
     if raison == "timeout":
         intro = "⏰ *Temps écoulé !* Personne n'a trouvé..."
     elif raison == "stop":
         intro = "🛑 *Partie arrêtée.*"
     else:
         intro = "🔓 *Solution révélée.*"
-    return f"{intro}\n\nLe mot était : *{mot.upper()}*\n\nTapez /starteasy · /startmedium · /starthard !"
+    suite = "" if mode in ("tournament", "daily") else "\n\nTapez /starteasy · /startmedium · /starthard !"
+    return f"{intro}\n\nLe mot était : *{mot.upper()}*{suite}"
 
 # ── Tournoi ─────────────────────────────────────────────────────
 def msg_debut_tournoi(difficulte: str, nb_manches: int) -> str:
