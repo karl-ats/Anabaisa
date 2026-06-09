@@ -35,8 +35,13 @@ async def guard_no_game(update: Update, chat_id: int) -> bool:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    user = update.effective_user
+    prenom = user.first_name if user and user.first_name else "toi"
     await update.message.reply_text(
-        "👋 *Bienvenue dans le Bot Anagramme !*\n\n"
+        f"😏 *Oh, {prenom}... tu viens jouer avec moi ?*\n\n"
+        "Je suis *Ana*, ton bot anagramme préféré — et je t'avertis, je ne suis pas facile à avoir… 😈\n\n"
+        "Je vais te mélanger les lettres, te faire chauffer les neurones et peut-être même te laisser gagner… si tu es sage. 🔥\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
         "🎮 *Parties rapides :*\n"
         "• /starteasy — 😊 Facile (≤6 lettres · 1 pt)\n"
         "• /startmedium — 🔥 Moyen (7–9 lettres · 2 pts)\n"
@@ -44,12 +49,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🏟️ *Tournois :*\n"
         "• /tournoi easy | medium | hard\n\n"
         "📋 *Autres :*\n"
-        "• /indice — Obtenir un indice\n"
-        "• /solution — Révéler la solution\n"
-        "• /scores — Classements hebdo + all-time\n"
-        "• /stop — Arrêter la partie en cours\n\n"
+        "• /indice — 💡 Un petit indice (juste pour toi 😉)\n"
+        "• /solution — 🏳️ Révéler la solution\n"
+        "• /scores — 🏆 Classements hebdo + all-time\n"
+        "• /stop — ⛔ Arrêter la partie\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
         "🌅 *Défi du jour automatique à 9h00 !*\n\n"
-        "Soyez le premier à trouver le mot et gagnez des points ! 🏆",
+        "Alors, t'as ce qu'il faut pour me battre ? 😘",
         parse_mode="Markdown"
     )
 
@@ -159,7 +165,7 @@ def main():
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(CommandHandler("start",       cmd_start))
+    app.add_handler(CommandHandler("startAna",    cmd_start))
     app.add_handler(CommandHandler("starteasy",   cmd_starteasy))
     app.add_handler(CommandHandler("startmedium", cmd_startmedium))
     app.add_handler(CommandHandler("starthard",   cmd_starthard))
