@@ -151,12 +151,10 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mot    = info["mot"]
     mode   = info["mode"]
     scores = info["scores_tournoi"]
-    # Toujours montrer le mot (que la partie soit encore active ou déjà expirée)
     await update.message.reply_text(
         msg.msg_solution(mot, "stop", mode),
         parse_mode="Markdown"
     )
-    # Si c'était un tournoi, afficher le bilan des scores
     if mode == "tournament":
         await update.message.reply_text(
             msg.msg_fin_tournoi(scores),

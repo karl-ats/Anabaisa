@@ -1,7 +1,7 @@
 import random
 
 # Mots classés par difficulté — tous vérifiés sans accents
-# easy   : 4-6 lettres (vrais mots français)
+# easy   : 3-6 lettres (vrais mots français)
 # medium : 7-9 lettres
 # hard   : 10+ lettres
 
