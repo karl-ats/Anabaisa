@@ -305,6 +305,54 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+# ── Commande admin : retirer des points à un joueur ──────────────
+async def cmd_retirer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+
+    if not admin_id or str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "ℹ️ Usage : `/retirer <nom> <points>`\nEx : `/retirer Karl 200`",
+            parse_mode="Markdown"
+        )
+        return
+
+    *nom_parts, pts_str = context.args
+    nom = " ".join(nom_parts)
+    try:
+        montant = int(pts_str)
+        if montant <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ Le montant doit être un entier positif.")
+        return
+
+    resultat = db.retirer_points_joueur(nom, montant)
+
+    if resultat["status"] == "not_found":
+        await update.message.reply_text(f"❌ Aucun joueur trouvé pour « {nom} ».")
+    elif resultat["status"] == "multiple":
+        noms = "\n".join(f"• {n}" for n in resultat["joueurs"])
+        await update.message.reply_text(
+            f"⚠️ Plusieurs joueurs correspondent à « {nom} » :\n{noms}\n\nSois plus précis.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"⚖️ *Points retirés*\n\n"
+            f"👤 *{resultat['name']}*\n"
+            f"📉 {resultat['avant']} pts → {resultat['apres']} pts\n"
+            f"🔻 -{montant} pts",
+            parse_mode="Markdown"
+        )
+
 # ── Handler texte (vérification réponse) ────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -333,6 +381,7 @@ def main():
     app.add_handler(CommandHandler("profil",      cmd_profil))
     app.add_handler(CommandHandler("pull",        cmd_pull))
     app.add_handler(CommandHandler("status",      cmd_status))
+    app.add_handler(CommandHandler("retirer",     cmd_retirer))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     sched.start_scheduler(app.bot)

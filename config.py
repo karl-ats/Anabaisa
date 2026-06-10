@@ -42,10 +42,15 @@ BONUS_SPEED_SECONDS = 5   # si trouvé en moins de X secondes → +1 pt
 
 # ── Niveaux joueur ──────────────────────────────────────────────
 LEVELS = [
-    (0,  "🐣 Débutant"),
-    (10, "📚 Amateur"),
-    (30, "🧠 Expert"),
-    (75, "👑 Maître des mots"),
+    (0,   "🐣 Débutant"),
+    (15,  "📖 Apprenti"),
+    (35,  "🔤 Initié"),
+    (65,  "🧩 Confirmé"),
+    (110, "🧠 Expert"),
+    (175, "⚡ Virtuose"),
+    (275, "🎯 Maître"),
+    (400, "🏆 Grand Maître"),
+    (600, "👑 Légende des mots"),
 ]
 
 # ── Défi du jour ────────────────────────────────────────────────
