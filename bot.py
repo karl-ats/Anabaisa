@@ -233,7 +233,7 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         with urllib.request.urlopen(req2) as r:
             commit_data = json.loads(r.read())
-        files = [f["filename"] for f in commit_data["files"] if f["status"] != "removed"]
+        files = [f["filename"] for f in commit_data["files"] if f["status"] != "removed" and f["filename"].endswith(".py")]
 
         workdir = os.path.dirname(os.path.abspath(__file__))
         for filename in files:
@@ -255,7 +255,7 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         await asyncio.sleep(2)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        sys.exit(0)
 
     except Exception as e:
         await update.message.reply_text(f"❌ Erreur lors du pull : {e}")
