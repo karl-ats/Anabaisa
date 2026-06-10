@@ -2,7 +2,7 @@ import asyncio
 import random
 import time
 import unicodedata
-from datetime import datetime
+from datetime import datetime, date
 
 import pytz
 
@@ -195,23 +195,41 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
     pts_total   = pts_base + (1 if bonus else 0)
 
     stats = db.add_points(user_id, user_name, pts_total)
+    old_niveau = db.get_niveau(stats["pts_alltime"] - pts_total)
+    level_up = old_niveau != stats["niveau"]
 
-    # Badges
+    # Badges — collectés puis écrits en une seule transaction
+    earned_badges = []
     if stats["serie"] >= 5:
-        db.add_badge(user_id, "⚡ Foudre de guerre")
+        earned_badges.append("⚡ Foudre de guerre")
     tz = pytz.timezone(TIMEZONE)
     hour = datetime.now(tz).hour
     if 0 <= hour < 5:
-        db.add_badge(user_id, "🌙 Noctambule")
+        earned_badges.append("🌙 Noctambule")
     first_hint_delay = HINT_SCHEDULE.get(difficulte, [15])[0]
     if elapsed < first_hint_delay:
-        db.add_badge(user_id, "🎯 Sans indice")
+        earned_badges.append("🎯 Sans indice")
+    newly_earned = db.add_badges(user_id, earned_badges)
 
     await bot.send_message(
         chat_id,
         msg.msg_victoire(user_name, mot, elapsed, pts_total, stats["pts_alltime"], stats["niveau"], bonus, game["mode"]),
         parse_mode="Markdown"
     )
+
+    if newly_earned:
+        await bot.send_message(
+            chat_id,
+            msg.msg_nouveaux_badges(user_name, newly_earned),
+            parse_mode="Markdown"
+        )
+
+    if level_up:
+        await bot.send_message(
+            chat_id,
+            msg.msg_level_up(user_name, stats["niveau"]),
+            parse_mode="Markdown"
+        )
 
     # Tournoi : mettre à jour scores
     if game["mode"] == "tournament":
@@ -223,9 +241,7 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
 
     # Défi du jour
     if game["mode"] == "daily":
-        from datetime import date
-        today = date.today().isoformat()
-        db.set_defi_gagnant(today, user_id, pts_total)
+        db.set_defi_gagnant(date.today().isoformat(), user_id, pts_total)
 
     return True
 

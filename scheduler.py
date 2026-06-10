@@ -10,7 +10,7 @@ from config import DAILY_HOUR, DAILY_MINUTE, RESULT_HOUR, RESULT_MINUTE, TIMEZON
 import database as db
 import messages as msg
 from words import get_word
-from game import melanger, start_round, start_tasks
+from game import melanger, start_round, start_tasks, GAMES
 
 # chat_ids enregistrés — persistés en DB, rechargés au démarrage
 REGISTERED_CHATS: set = set()
@@ -26,6 +26,8 @@ def load_registered_chats():
 
 # ── Défi du jour ─────────────────────────────────────────────────
 async def _send_defi_to_chat(chat_id: int, bot, mot: str, anag: str, difficulte: str):
+    if GAMES.get(chat_id, {}).get("actif"):
+        return  # Ne pas interrompre une partie en cours
     await start_round(chat_id, difficulte, bot, mode="daily", mot=mot)
     await bot.send_message(
         chat_id,
@@ -42,11 +44,14 @@ async def send_daily_challenge(bot):
 
     db.save_defi(today, mot, difficulte)
 
-    await asyncio.gather(
-        *[_send_defi_to_chat(chat_id, bot, mot, anag, difficulte)
-          for chat_id in REGISTERED_CHATS],
+    chats = list(REGISTERED_CHATS)
+    results = await asyncio.gather(
+        *[_send_defi_to_chat(c, bot, mot, anag, difficulte) for c in chats],
         return_exceptions=True
     )
+    for chat_id, result in zip(chats, results):
+        if isinstance(result, Exception):
+            print(f"[Scheduler] Erreur défi chat {chat_id}: {result}")
 
 async def send_daily_result(bot):
     today = date.today().isoformat()
@@ -71,10 +76,13 @@ async def send_daily_result(bot):
                 parse_mode="Markdown"
             )
 
-    await asyncio.gather(
-        *[_send(chat_id) for chat_id in REGISTERED_CHATS],
-        return_exceptions=True
+    chats = list(REGISTERED_CHATS)
+    results = await asyncio.gather(
+        *[_send(c) for c in chats], return_exceptions=True
     )
+    for chat_id, result in zip(chats, results):
+        if isinstance(result, Exception):
+            print(f"[Scheduler] Erreur résultat défi chat {chat_id}: {result}")
 
 # ── Champion de la semaine (lundi 9h) ────────────────────────────
 async def send_weekly_champion(bot):
@@ -94,10 +102,13 @@ async def send_weekly_champion(bot):
                 parse_mode="Markdown"
             )
 
-    await asyncio.gather(
-        *[_send(chat_id) for chat_id in REGISTERED_CHATS],
-        return_exceptions=True
+    chats = list(REGISTERED_CHATS)
+    results = await asyncio.gather(
+        *[_send(c) for c in chats], return_exceptions=True
     )
+    for chat_id, result in zip(chats, results):
+        if isinstance(result, Exception):
+            print(f"[Scheduler] Erreur champion chat {chat_id}: {result}")
     db.reset_hebdo()
 
 # ── Démarrage scheduler ───────────────────────────────────────────

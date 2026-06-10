@@ -9,7 +9,7 @@ WORDS = {
     "easy": [
         # animaux
         "chat", "chien", "lapin", "souris", "renard", "loup", "ours", "lion",
-        "singe", "girafe", "tigre", "zebra", "truite", "carpe", "poule",
+        "singe", "girafe", "tigre", "zebre", "truite", "carpe", "poule",
         "mouton", "canard",
         # nature
         "arbre", "fleur", "herbe", "tige", "foret", "ocean", "sable",
@@ -49,7 +49,7 @@ WORDS = {
         "hamster", "vautour", "scorpion",
         # nature / géo
         "montagne", "riviere", "glacier", "savanne", "cyclone", "ouragan",
-        "horizon", "paysage", "volcanique",
+        "horizon", "paysage",
         # objets / lieux
         "escalier", "horloge", "lanterne", "pendule", "tableau", "parasol",
         "palmier", "mosquee", "village", "veranda", "immeuble", "logiciel",
@@ -57,7 +57,7 @@ WORDS = {
         # concepts / qualités
         "harmonie", "sagesse", "silence", "patience", "richesse", "tendresse",
         "serenite", "illusion", "evasion", "victoire", "fantome", "symbole",
-        "message", "example", "formule", "mystere",
+        "message", "exemple", "formule", "mystere",
         # actions / états
         "imaginer", "partager", "embarquer", "enchanter", "entendre",
         # mots courants
@@ -72,19 +72,19 @@ WORDS = {
         # travail / société
         "domicile", "emission", "ecologie", "fabrique", "gardien",
         "magicien", "menuisier", "jongleur", "artisan", "reunion",
-        "peinture", "portrait", "librairie", "logiciel", "numerique",
+        "peinture", "portrait", "librairie", "numerique",
         "obstacle", "organique", "robotique", "transport", "nautique",
-        "petanque", "pilotage", "physique", "pilotage",
+        "petanque", "pilotage", "physique",
         # divers
         "chouette", "licorne", "girafon", "flamant", "rossignol",
         "ruisseau", "rondelle", "limaces", "lionnes", "magnolia",
         "majeste", "marathon", "parfumer", "parachute", "poudriere",
         "grillage", "glissade", "ficelle", "farouche", "forgeron",
-        "gazeuse", "gardien", "arpege", "arsenal", "arsenic",
+        "gazeuse", "arpege", "arsenal", "arsenic",
         "arrivee", "arrosage", "artichaut", "arrosoir", "ardoise",
         "argument", "armement", "armoire", "armurier", "accident",
         "activite", "addition", "affiche", "alliance", "ambition",
-        "amusement", "analyse", "angoisse", "animation", "appartement",
+        "amusement", "analyse", "angoisse", "animation",
         "appareil", "appetit", "apprenti", "approche", "arbitre",
         "archange", "archerie", "archipel", "arctique",
     ],
@@ -123,6 +123,8 @@ WORDS = {
         "valorisation", "verification", "vulgarisation", "acceleration",
         "acceptation", "accentuation", "accelerateur", "accessibilite",
         "acclimatation", "accompagnement", "accommodation",
+        # mots déplacés depuis medium (trop longs)
+        "volcanique", "appartement",
     ],
 }
 

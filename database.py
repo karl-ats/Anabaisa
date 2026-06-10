@@ -100,20 +100,38 @@ def add_points(user_id: str, name: str, pts: int) -> dict:
         "niveau":      get_niveau(row["pts_alltime"]),
     }
 
+def get_profil(user_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM joueurs WHERE user_id = ?", (user_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["badges"] = json.loads(d["badges"]) if d["badges"] else []
+    d["niveau"] = get_niveau(d["pts_alltime"])
+    return d
+
 def reset_serie(user_id: str):
     with get_conn() as conn:
         conn.execute("UPDATE joueurs SET serie = 0 WHERE user_id = ?", (user_id,))
 
 def add_badge(user_id: str, badge: str):
+    add_badges(user_id, [badge])
+
+def add_badges(user_id: str, badges_to_add: list) -> list:
+    """Ajoute les badges manquants. Retourne la liste des badges réellement nouveaux."""
+    if not badges_to_add:
+        return []
     with get_conn() as conn:
         row = conn.execute("SELECT badges FROM joueurs WHERE user_id = ?", (user_id,)).fetchone()
         if not row:
-            return
-        badges = json.loads(row["badges"]) if row["badges"] else []
-        if badge not in badges:
-            badges.append(badge)
+            return []
+        existing = json.loads(row["badges"]) if row["badges"] else []
+        new = [b for b in badges_to_add if b not in existing]
+        if new:
+            existing.extend(new)
             conn.execute("UPDATE joueurs SET badges = ? WHERE user_id = ?",
-                         (json.dumps(badges), user_id))
+                         (json.dumps(existing), user_id))
+    return new
 
 # ── Classements ─────────────────────────────────────────────────
 def get_classement_hebdo(limit: int = 10) -> list:
