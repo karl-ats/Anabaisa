@@ -194,8 +194,20 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
     admin_id = os.environ.get("ADMIN_ID", "")
 
+    if not admin_id:
+        await update.message.reply_text(
+            f"⚙️ *ADMIN\\_ID non configuré.*\n\n"
+            f"Ton ID Telegram est : `{user_id}`\n\n"
+            f"Copie ce nombre et configure-le comme secret `ADMIN_ID` dans Replit.",
+            parse_mode="Markdown"
+        )
+        return
+
     if str(user_id) != str(admin_id):
-        await update.message.reply_text("🚫 Commande réservée à l'admin.")
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
         return
 
     await update.message.reply_text("⏳ Pull GitHub en cours…")
@@ -253,8 +265,11 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
     admin_id = os.environ.get("ADMIN_ID", "")
 
-    if str(user_id) != str(admin_id):
-        await update.message.reply_text("🚫 Commande réservée à l'admin.")
+    if not admin_id or str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
         return
 
     try:
