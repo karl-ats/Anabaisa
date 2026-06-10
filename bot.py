@@ -17,6 +17,9 @@ import messages as msg
 import game as g
 import scheduler as sched
 
+# ── Mode repos (maintenance) ─────────────────────────────────────
+PAUSED = False
+
 # ── Helpers ──────────────────────────────────────────────────────
 def user_info(update: Update):
     u = update.effective_user
@@ -67,7 +70,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+async def _guard_paused(update: Update) -> bool:
+    if PAUSED:
+        await update.message.reply_text("😴 Ana est en repos pour le moment. Revenez bientôt !")
+        return True
+    return False
+
 async def cmd_starteasy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _guard_paused(update): return
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
     if await guard_no_game(update, chat_id):
@@ -80,6 +90,7 @@ async def cmd_starteasy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g.start_tasks(chat_id, context.bot)
 
 async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _guard_paused(update): return
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
     if await guard_no_game(update, chat_id):
@@ -92,6 +103,7 @@ async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g.start_tasks(chat_id, context.bot)
 
 async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _guard_paused(update): return
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
     if await guard_no_game(update, chat_id):
@@ -104,6 +116,7 @@ async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g.start_tasks(chat_id, context.bot)
 
 async def cmd_tournoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await _guard_paused(update): return
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
     if await guard_no_game(update, chat_id):
@@ -192,6 +205,31 @@ async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+# ── Commandes admin : pause / wake ───────────────────────────────
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global PAUSED
+    user_id, _ = user_info(update)
+    if str(user_id) != str(os.environ.get("ADMIN_ID", "")):
+        await update.message.reply_text("🚫 Commande réservée à l'admin.")
+        return
+    PAUSED = True
+    await update.message.reply_text(
+        "😴 *Ana est en repos.* Elle ne répondra plus aux commandes de jeu jusqu'au prochain `/wake`.",
+        parse_mode="Markdown"
+    )
+
+async def cmd_wake(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global PAUSED
+    user_id, _ = user_info(update)
+    if str(user_id) != str(os.environ.get("ADMIN_ID", "")):
+        await update.message.reply_text("🚫 Commande réservée à l'admin.")
+        return
+    PAUSED = False
+    await update.message.reply_text(
+        "😏 *Ana est de retour !* Prêt·e à jouer ? 🔥",
+        parse_mode="Markdown"
+    )
+
 # ── Commande admin : pull GitHub + restart ───────────────────────
 async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
@@ -233,7 +271,7 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         with urllib.request.urlopen(req2) as r:
             commit_data = json.loads(r.read())
-        files = [f["filename"] for f in commit_data["files"] if f["status"] != "removed" and f["filename"].endswith(".py")]
+        files = [f["filename"] for f in commit_data["files"] if f["status"] != "removed"]
 
         workdir = os.path.dirname(os.path.abspath(__file__))
         for filename in files:
@@ -255,7 +293,7 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         await asyncio.sleep(2)
-        sys.exit(0)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     except Exception as e:
         await update.message.reply_text(f"❌ Erreur lors du pull : {e}")
@@ -333,6 +371,8 @@ def main():
     app.add_handler(CommandHandler("profil",      cmd_profil))
     app.add_handler(CommandHandler("pull",        cmd_pull))
     app.add_handler(CommandHandler("status",      cmd_status))
+    app.add_handler(CommandHandler("pause",       cmd_pause))
+    app.add_handler(CommandHandler("wake",        cmd_wake))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     sched.start_scheduler(app.bot)
