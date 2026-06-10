@@ -52,6 +52,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /indice — 💡 Un petit indice (juste pour toi 😉)\n"
         "• /solution — 🏳️ Révéler la solution\n"
         "• /scores — 🏆 Classements hebdo + all-time\n"
+        "• /profil — 👤 Tes stats et badges\n"
         "• /stop — ⛔ Arrêter la partie\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "🌅 *Défi du jour automatique à 9h00 !*\n\n"
@@ -170,6 +171,22 @@ async def cmd_scores(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, _ = user_info(update)
+    profil = db.get_profil(user_id)
+    if not profil:
+        await update.message.reply_text(
+            "❌ Tu n'as pas encore joué ! Lance /starteasy pour commencer."
+        )
+        return
+    await update.message.reply_text(
+        msg.msg_profil(
+            profil["name"], profil["pts_alltime"], profil["pts_hebdo"],
+            profil["victoires"], profil["serie"], profil["badges"], profil["niveau"]
+        ),
+        parse_mode="Markdown"
+    )
+
 # ── Handler texte (vérification réponse) ────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -195,6 +212,7 @@ def main():
     app.add_handler(CommandHandler("solution",    cmd_solution))
     app.add_handler(CommandHandler("stop",        cmd_stop))
     app.add_handler(CommandHandler("scores",      cmd_scores))
+    app.add_handler(CommandHandler("profil",      cmd_profil))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Scheduler (défi du jour, résultats, champion semaine)

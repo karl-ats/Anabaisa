@@ -161,3 +161,30 @@ def msg_champion_semaine(nom: str, pts: int) -> str:
 
 def msg_relance() -> str:
     return random.choice(TAUNTS)
+
+# ── Profil joueur ────────────────────────────────────────────────
+def msg_profil(name: str, pts_alltime: int, pts_hebdo: int, victoires: int, serie: int, badges: list, niveau: str) -> str:
+    badges_str = "  ".join(badges) if badges else "_Aucun badge encore_"
+    return (
+        f"👤 *Profil de {name}*\n\n"
+        f"🏅 Niveau : {niveau}\n"
+        f"💰 Points all-time : *{pts_alltime} pts*\n"
+        f"📅 Points cette semaine : *{pts_hebdo} pts*\n"
+        f"🏆 Victoires : *{victoires}*\n"
+        f"🔥 Série en cours : *{serie}*\n\n"
+        f"🎖️ *Badges :*\n{badges_str}"
+    )
+
+# ── Montée de niveau ─────────────────────────────────────────────
+def msg_level_up(prenom: str, nouveau_niveau: str) -> str:
+    return (
+        f"🆙 *MONTÉE DE NIVEAU !*\n\n"
+        f"*{prenom}* atteint le rang *{nouveau_niveau}* ! 🎊\n"
+        f"Continue comme ça !"
+    )
+
+# ── Nouveau badge ────────────────────────────────────────────────
+def msg_nouveaux_badges(prenom: str, badges: list) -> str:
+    s = "s" if len(badges) > 1 else ""
+    badges_str = "  ".join(badges)
+    return f"🎖️ *Badge{s} débloqué{s} pour {prenom} !* {badges_str}"
