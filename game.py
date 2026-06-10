@@ -58,6 +58,7 @@ def give_hint(chat_id: int):
     return masque_indice(mot, revealed), count + 1, max_h
 
 def nettoyer(texte: str) -> str:
+    """Normalise accents et casse pour la comparaison."""
     texte = texte.strip().lower()
     return unicodedata.normalize("NFD", texte).encode("ascii", "ignore").decode()
 
@@ -128,7 +129,7 @@ def start_tasks(chat_id: int, bot):
     diff        = game["difficulte"]
     sol_delay   = SOLUTION_DELAY.get(diff, 60)
     hint_delays = HINT_SCHEDULE.get(diff, [15])
-    loop  = asyncio.get_running_loop()
+    loop = asyncio.get_running_loop()
     tasks = [loop.create_task(_taunt_task(chat_id, bot))]
     for delay in hint_delays:
         tasks.append(loop.create_task(_hint_task(chat_id, bot, delay)))
@@ -237,6 +238,7 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
             parse_mode="Markdown"
         )
 
+    # Tournoi : mettre à jour scores
     if game["mode"] == "tournament":
         st = game["scores_tournoi"]
         if user_id not in st:

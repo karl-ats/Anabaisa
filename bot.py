@@ -1,3 +1,10 @@
+import os
+import sys
+import asyncio
+import urllib.request
+import json
+import base64
+
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -185,6 +192,119 @@ async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+# ── Commande admin : pull GitHub + restart ───────────────────────
+async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+
+    if not admin_id:
+        await update.message.reply_text(
+            f"⚙️ *ADMIN\\_ID non configuré.*\n\n"
+            f"Ton ID Telegram est : `{user_id}`\n\n"
+            f"Copie ce nombre et configure-le comme secret `ADMIN_ID` dans Replit.",
+            parse_mode="Markdown"
+        )
+        return
+
+    if str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+
+    await update.message.reply_text("⏳ Pull GitHub en cours…")
+
+    try:
+        token = os.environ.get("GITHUB_TOKEN", "")
+
+        req = urllib.request.Request(
+            "https://api.github.com/repos/karl-ats/Anabaisa/commits?per_page=1",
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        )
+        with urllib.request.urlopen(req) as r:
+            commits = json.loads(r.read())
+        latest_sha = commits[0]["sha"][:10]
+        latest_msg = commits[0]["commit"]["message"].split("\n")[0]
+
+        req2 = urllib.request.Request(
+            f"https://api.github.com/repos/karl-ats/Anabaisa/commits/{latest_sha}",
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        )
+        with urllib.request.urlopen(req2) as r:
+            commit_data = json.loads(r.read())
+        files = [f["filename"] for f in commit_data["files"] if f["status"] != "removed"]
+
+        workdir = os.path.dirname(os.path.abspath(__file__))
+        for filename in files:
+            req3 = urllib.request.Request(
+                f"https://api.github.com/repos/karl-ats/Anabaisa/contents/{filename}?ref=main",
+                headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+            )
+            with urllib.request.urlopen(req3) as r:
+                data = json.loads(r.read())
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            with open(os.path.join(workdir, filename), "w", encoding="utf-8") as f:
+                f.write(content)
+
+        await update.message.reply_text(
+            f"✅ *Pull réussi !*\n"
+            f"🔖 `{latest_sha}` — {latest_msg}\n"
+            f"📄 Fichiers : `{'`, `'.join(files)}`\n\n"
+            f"♻️ Redémarrage dans 2 secondes…",
+            parse_mode="Markdown"
+        )
+        await asyncio.sleep(2)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erreur lors du pull : {e}")
+
+# ── Commande admin : statut du bot ───────────────────────────────
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+
+    if not admin_id or str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+
+    try:
+        token = os.environ.get("GITHUB_TOKEN", "")
+        req = urllib.request.Request(
+            "https://api.github.com/repos/karl-ats/Anabaisa/commits?per_page=1",
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        )
+        with urllib.request.urlopen(req) as r:
+            commits = json.loads(r.read())
+        sha = commits[0]["sha"][:10]
+        commit_msg = commits[0]["commit"]["message"].split("\n")[0]
+        commit_date = commits[0]["commit"]["committer"]["date"][:10]
+    except Exception:
+        sha, commit_msg, commit_date = "?", "Impossible de joindre GitHub", "?"
+
+    parties_actives = [(cid, g.GAMES[cid]) for cid in g.GAMES if g.GAMES[cid].get("actif")]
+    nb_chats_total = len(sched.REGISTERED_CHATS)
+
+    lines = [
+        "🤖 *Statut du bot Ana*",
+        "",
+        f"🔖 *Version :* `{sha}` — {commit_msg} ({commit_date})",
+        "",
+        f"💬 *Chats enregistrés :* {nb_chats_total}",
+        f"🎮 *Parties en cours :* {len(parties_actives)}",
+    ]
+    for cid, game in parties_actives:
+        mode_label = {"quick": "Rapide", "tournament": "Tournoi", "daily": "Défi"}.get(game.get("mode", ""), game.get("mode", ""))
+        lines.append(f"   • Chat `{cid}` — {mode_label} · {game.get('difficulte', '?')} · `{game.get('anagramme', '?').upper()}`")
+
+    lines += ["", f"⏰ *Prochain défi du jour :* 9h00 ({sched.REGISTERED_CHATS and 'actif' or 'aucun chat'})"]
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
 # ── Handler texte (vérification réponse) ────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -211,9 +331,10 @@ def main():
     app.add_handler(CommandHandler("stop",        cmd_stop))
     app.add_handler(CommandHandler("scores",      cmd_scores))
     app.add_handler(CommandHandler("profil",      cmd_profil))
+    app.add_handler(CommandHandler("pull",        cmd_pull))
+    app.add_handler(CommandHandler("status",      cmd_status))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Scheduler (défi du jour, résultats, champion semaine)
     sched.start_scheduler(app.bot)
 
     print("🤖 Bot Anagramme v2 démarré !")
