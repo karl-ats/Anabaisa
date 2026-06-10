@@ -26,17 +26,14 @@ def melanger(mot: str) -> str:
 MAX_HINTS = {"easy": 1, "medium": 2, "hard": 3}
 
 def masque_indice(mot: str, revealed: set) -> str:
-    """Construit le masque d'indice selon les positions révélées."""
     return " ".join(mot[i] if i in revealed else "_" for i in range(len(mot)))
 
 def _init_revealed(mot: str) -> set:
-    """Premier indice : première et dernière lettre."""
     if len(mot) <= 2:
         return set(range(len(mot)))
     return {0, len(mot) - 1}
 
 def _next_revealed(mot: str, current: set) -> set:
-    """Ajoute 1-2 lettres aléatoires du milieu non encore révélées."""
     middle = [i for i in range(1, len(mot) - 1) if i not in current]
     if not middle:
         return current
@@ -44,13 +41,13 @@ def _next_revealed(mot: str, current: set) -> set:
     return current | set(random.sample(middle, count))
 
 def give_hint(chat_id: int):
-    """Avance d'un cran l'indice et retourne (masque, hint_count, max_hints) ou None si max atteint."""
+    """Retourne (masque, hint_count, max_hints) ou None si max atteint."""
     game = GAMES.get(chat_id)
     if not game or not game.get("actif"):
         return None
-    diff    = game["difficulte"]
-    max_h   = MAX_HINTS.get(diff, 1)
-    count   = game["hint_count"]
+    diff     = game["difficulte"]
+    max_h    = MAX_HINTS.get(diff, 1)
+    count    = game["hint_count"]
     if count >= max_h:
         return None
     mot      = game["mot"]
@@ -68,23 +65,28 @@ def nettoyer(texte: str) -> str:
 # ── État global ──────────────────────────────────────────────────
 # Structure par chat_id :
 # {
-#   "mode":        "quick" | "tournament" | "daily",
-#   "difficulte":  "easy" | "medium" | "hard",
-#   "mot":         str,
-#   "anagramme":   str,
-#   "actif":       bool,
-#   "start_time":  float,
-#   "tasks":       [asyncio.Task, ...],
-#   # Tournoi uniquement :
-#   "manche":      int,
-#   "scores_tournoi": {user_id: {"name": str, "pts": int}},
+#   "mode":             "quick" | "tournament" | "daily",
+#   "difficulte":       "easy" | "medium" | "hard",
+#   "mot":              str,
+#   "anagramme":        str,
+#   "actif":            bool,
+#   "start_time":       float | None,   # None jusqu'à start_tasks
+#   "tasks":            [asyncio.Task, ...],
+#   "manche":           int,            # tournoi uniquement
+#   "scores_tournoi":   {user_id: {"name": str, "pts": int}},
+#   "hint_count":       int,
+#   "revealed_positions": set,
 # }
 GAMES: dict = {}
 
-async def _cancel_tasks(chat_id: int):
+def _cancel_tasks_sync(chat_id: int):
+    """Annule les tâches en cours sans await (safe depuis contexte sync ou async)."""
     for t in GAMES.get(chat_id, {}).get("tasks", []):
         if not t.done():
             t.cancel()
+
+async def _cancel_tasks(chat_id: int):
+    _cancel_tasks_sync(chat_id)
 
 # ── Lancement partie ─────────────────────────────────────────────
 async def start_round(
@@ -103,28 +105,28 @@ async def start_round(
     await _cancel_tasks(chat_id)
 
     GAMES[chat_id] = {
-        "mode":              mode,
-        "difficulte":        difficulte,
-        "mot":               mot,
-        "anagramme":         anag,
-        "actif":             True,
-        "start_time":        None,   # défini dans start_tasks, après envoi du message
-        "tasks":             [],
-        "manche":            manche,
-        "scores_tournoi":    scores_tournoi or {},
-        "hint_count":        0,
+        "mode":               mode,
+        "difficulte":         difficulte,
+        "mot":                mot,
+        "anagramme":          anag,
+        "actif":              True,
+        "start_time":         None,   # défini dans start_tasks
+        "tasks":              [],
+        "manche":             manche,
+        "scores_tournoi":     scores_tournoi or {},
+        "hint_count":         0,
         "revealed_positions": set(),
     }
 
     return mot, anag
 
 def start_tasks(chat_id: int, bot):
-    """Démarre les timers APRÈS que le message initial a été envoyé avec succès."""
+    """Démarre les timers APRÈS que le message initial a été envoyé."""
     game = GAMES.get(chat_id)
     if not game:
         return
     game["start_time"] = time.time()
-    diff = game["difficulte"]
+    diff        = game["difficulte"]
     sol_delay   = SOLUTION_DELAY.get(diff, 60)
     hint_delays = HINT_SCHEDULE.get(diff, [15])
     loop = asyncio.get_running_loop()
@@ -163,7 +165,6 @@ async def _solution_task(chat_id: int, bot, delay: int = 60):
     mode = game["mode"]
     GAMES[chat_id]["actif"] = False
 
-    # Annuler les AUTRES tâches (taunt/hint) — ne pas s'annuler soi-même
     current = asyncio.current_task()
     for t in game.get("tasks", []):
         if not t.done() and t is not current:
@@ -173,11 +174,17 @@ async def _solution_task(chat_id: int, bot, delay: int = 60):
 
     if mode == "tournament":
         await _next_manche_or_end(chat_id, bot)
+    else:
+        GAMES.pop(chat_id, None)
 
 # ── Vérification réponse ─────────────────────────────────────────
 async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, bot) -> bool:
     game = GAMES.get(chat_id)
     if not game or not game["actif"]:
+        return False
+
+    # Guard : message reçu avant que start_tasks ait initialisé le chrono
+    if game["start_time"] is None:
         return False
 
     mot = game["mot"]
@@ -186,23 +193,23 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
 
     # Bonne réponse !
     game["actif"] = False
-    await _cancel_tasks(chat_id)
+    _cancel_tasks_sync(chat_id)
 
-    elapsed     = time.time() - game["start_time"]
-    difficulte  = game["difficulte"]
-    pts_base    = POINTS[difficulte]
-    bonus       = elapsed < BONUS_SPEED_SECONDS
-    pts_total   = pts_base + (1 if bonus else 0)
+    elapsed    = time.time() - game["start_time"]
+    difficulte = game["difficulte"]
+    pts_base   = POINTS[difficulte]
+    bonus      = elapsed < BONUS_SPEED_SECONDS
+    pts_total  = pts_base + (1 if bonus else 0)
 
-    stats = db.add_points(user_id, user_name, pts_total)
+    stats      = db.add_points(user_id, user_name, pts_total)
     old_niveau = db.get_niveau(stats["pts_alltime"] - pts_total)
-    level_up = old_niveau != stats["niveau"]
+    level_up   = old_niveau != stats["niveau"]
 
-    # Badges — collectés puis écrits en une seule transaction
+    # Badges — une seule transaction DB
     earned_badges = []
     if stats["serie"] >= 5:
         earned_badges.append("⚡ Foudre de guerre")
-    tz = pytz.timezone(TIMEZONE)
+    tz   = pytz.timezone(TIMEZONE)
     hour = datetime.now(tz).hour
     if 0 <= hour < 5:
         earned_badges.append("🌙 Noctambule")
@@ -238,10 +245,11 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
             st[user_id] = {"name": user_name, "pts": 0}
         st[user_id]["pts"] += pts_total
         await _next_manche_or_end(chat_id, bot)
-
-    # Défi du jour
-    if game["mode"] == "daily":
-        db.set_defi_gagnant(date.today().isoformat(), user_id, pts_total)
+    else:
+        # Nettoyer l'état pour les modes quick et daily
+        if game["mode"] == "daily":
+            db.set_defi_gagnant(date.today().isoformat(), user_id, pts_total)
+        GAMES.pop(chat_id, None)
 
     return True
 
@@ -253,6 +261,9 @@ async def start_tournament(chat_id: int, difficulte: str, bot):
         parse_mode="Markdown"
     )
     await asyncio.sleep(3)
+    # Guard : une autre partie a pu démarrer pendant le countdown
+    if GAMES.get(chat_id, {}).get("actif"):
+        return
     await _launch_manche(chat_id, difficulte, bot, manche=1, scores_tournoi={})
 
 async def _launch_manche(chat_id: int, difficulte: str, bot, manche: int, scores_tournoi: dict):
@@ -266,32 +277,37 @@ async def _launch_manche(chat_id: int, difficulte: str, bot, manche: int, scores
     start_tasks(chat_id, bot)
 
 async def _next_manche_or_end(chat_id: int, bot):
-    game      = GAMES.get(chat_id, {})
-    manche    = game.get("manche", 1)
+    game       = GAMES.get(chat_id, {})
+    manche     = game.get("manche", 1)
     difficulte = game.get("difficulte", "easy")
-    scores    = game.get("scores_tournoi", {})
+    scores     = game.get("scores_tournoi", {})
 
     if manche >= TOURNAMENT_ROUNDS:
         await asyncio.sleep(2)
+        # /stop a pu être appelé pendant le sommeil
+        if chat_id not in GAMES:
+            return
         await bot.send_message(chat_id, msg.msg_fin_tournoi(scores), parse_mode="Markdown")
         GAMES.pop(chat_id, None)
     else:
         await asyncio.sleep(3)
+        # /stop a pu être appelé pendant le sommeil
+        if chat_id not in GAMES:
+            return
         await _launch_manche(chat_id, difficulte, bot, manche + 1, scores)
 
 # ── Stop ─────────────────────────────────────────────────────────
 async def stop_game(chat_id: int) -> dict | None:
-    """Retourne un dict avec mot, was_active, mode, scores_tournoi — ou None si aucune partie."""
+    """Retourne les infos de la partie en cours, ou None si aucune partie active."""
     game = GAMES.get(chat_id)
-    if not game:
+    if not game or not game.get("actif"):
         return None
     result = {
         "mot":            game["mot"],
-        "was_active":     game["actif"],
         "mode":           game["mode"],
         "scores_tournoi": dict(game.get("scores_tournoi", {})),
     }
     game["actif"] = False
-    await _cancel_tasks(chat_id)
+    _cancel_tasks_sync(chat_id)
     GAMES.pop(chat_id, None)
     return result
