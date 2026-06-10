@@ -248,6 +248,65 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Erreur lors du pull : {e}")
 
+# ── Commande admin : statut du bot ───────────────────────────────
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+
+    if str(user_id) != str(admin_id):
+        await update.message.reply_text("🚫 Commande réservée à l'admin.")
+        return
+
+    try:
+        token = os.environ.get("GITHUB_TOKEN", "")
+
+        # Dernier commit GitHub
+        req = urllib.request.Request(
+            "https://api.github.com/repos/karl-ats/Anabaisa/commits?per_page=1",
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        )
+        with urllib.request.urlopen(req) as r:
+            commits = json.loads(r.read())
+        sha = commits[0]["sha"][:10]
+        commit_msg = commits[0]["commit"]["message"].split("\n")[0]
+        commit_date = commits[0]["commit"]["committer"]["date"][:10]
+    except Exception:
+        sha, commit_msg, commit_date = "?", "Impossible de joindre GitHub", "?"
+
+    # Parties en cours
+    parties_actives = [(cid, g.GAMES[cid]) for cid in g.GAMES if g.GAMES[cid].get("actif")]
+    nb_chats_total = len(sched.CHAT_IDS) if hasattr(sched, "CHAT_IDS") else "?"
+
+    # Prochain défi du jour
+    try:
+        from apscheduler.schedulers.base import STATE_RUNNING
+        jobs = sched._scheduler.get_jobs() if hasattr(sched, "_scheduler") else []
+        prochain_defi = next(
+            (str(j.next_run_time)[:19] for j in jobs if "defi" in j.id.lower()),
+            "Inconnu"
+        )
+    except Exception:
+        prochain_defi = "Inconnu"
+
+    lines = [
+        "🤖 *Statut du bot Ana*",
+        "",
+        f"🔖 *Version :* `{sha}` — {commit_msg} ({commit_date})",
+        "",
+        f"💬 *Chats enregistrés :* {nb_chats_total}",
+        f"🎮 *Parties en cours :* {len(parties_actives)}",
+    ]
+    for cid, game in parties_actives:
+        mode_label = {"quick": "Rapide", "tournament": "Tournoi", "daily": "Défi"}.get(game.get("mode", ""), game.get("mode", ""))
+        lines.append(f"   • Chat `{cid}` — {mode_label} · {game.get('difficulte', '?')} · `{game.get('anagramme', '?').upper()}`")
+
+    lines += [
+        "",
+        f"⏰ *Prochain défi du jour :* {prochain_defi}",
+    ]
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
 # ── Handler texte (vérification réponse) ────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -275,6 +334,7 @@ def main():
     app.add_handler(CommandHandler("scores",      cmd_scores))
     app.add_handler(CommandHandler("profil",      cmd_profil))
     app.add_handler(CommandHandler("pull",        cmd_pull))
+    app.add_handler(CommandHandler("status",      cmd_status))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Scheduler (défi du jour, résultats, champion semaine)
