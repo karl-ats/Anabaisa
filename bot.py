@@ -17,13 +17,20 @@ import messages as msg
 import game as g
 import scheduler as sched
 
-# ── Mode repos (maintenance) ─────────────────────────────────────
-PAUSED = False
+# ── État global ──────────────────────────────────────────────────
+BOT_EN_PAUSE = False
 
 # ── Helpers ──────────────────────────────────────────────────────
 def user_info(update: Update):
     u = update.effective_user
     return str(u.id), u.first_name or u.username or "Anonyme"
+
+async def guard_pause(update: Update) -> bool:
+    """Retourne True si le bot est en pause (et envoie un message)."""
+    if BOT_EN_PAUSE:
+        await update.message.reply_text("😴 Ana est en repos… Revenez plus tard !")
+        return True
+    return False
 
 async def guard_no_game(update: Update, chat_id: int) -> bool:
     """Retourne True si une partie est déjà active (et envoie un message)."""
@@ -70,16 +77,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-async def _guard_paused(update: Update) -> bool:
-    if PAUSED:
-        await update.message.reply_text("😴 Ana est en repos pour le moment. Revenez bientôt !")
-        return True
-    return False
-
 async def cmd_starteasy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _guard_paused(update): return
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    if await guard_pause(update): return
     if await guard_no_game(update, chat_id):
         return
     mot, anag = await g.start_round(chat_id, "easy", context.bot)
@@ -90,9 +91,9 @@ async def cmd_starteasy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g.start_tasks(chat_id, context.bot)
 
 async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _guard_paused(update): return
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    if await guard_pause(update): return
     if await guard_no_game(update, chat_id):
         return
     mot, anag = await g.start_round(chat_id, "medium", context.bot)
@@ -103,9 +104,9 @@ async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g.start_tasks(chat_id, context.bot)
 
 async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _guard_paused(update): return
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    if await guard_pause(update): return
     if await guard_no_game(update, chat_id):
         return
     mot, anag = await g.start_round(chat_id, "hard", context.bot)
@@ -116,9 +117,9 @@ async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g.start_tasks(chat_id, context.bot)
 
 async def cmd_tournoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await _guard_paused(update): return
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    if await guard_pause(update): return
     if await guard_no_game(update, chat_id):
         return
 
@@ -205,31 +206,6 @@ async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ── Commandes admin : pause / wake ───────────────────────────────
-async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global PAUSED
-    user_id, _ = user_info(update)
-    if str(user_id) != str(os.environ.get("ADMIN_ID", "")):
-        await update.message.reply_text("🚫 Commande réservée à l'admin.")
-        return
-    PAUSED = True
-    await update.message.reply_text(
-        "😴 *Ana est en repos.* Elle ne répondra plus aux commandes de jeu jusqu'au prochain `/wake`.",
-        parse_mode="Markdown"
-    )
-
-async def cmd_wake(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global PAUSED
-    user_id, _ = user_info(update)
-    if str(user_id) != str(os.environ.get("ADMIN_ID", "")):
-        await update.message.reply_text("🚫 Commande réservée à l'admin.")
-        return
-    PAUSED = False
-    await update.message.reply_text(
-        "😏 *Ana est de retour !* Prêt·e à jouer ? 🔥",
-        parse_mode="Markdown"
-    )
-
 # ── Commande admin : pull GitHub + restart ───────────────────────
 async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
@@ -271,7 +247,7 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         with urllib.request.urlopen(req2) as r:
             commit_data = json.loads(r.read())
-        files = [f["filename"] for f in commit_data["files"] if f["status"] != "removed"]
+        files = [f["filename"] for f in commit_data["files"] if f["status"] != "removed" and f["filename"].endswith(".py")]
 
         workdir = os.path.dirname(os.path.abspath(__file__))
         for filename in files:
@@ -293,7 +269,7 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         await asyncio.sleep(2)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        os._exit(0)
 
     except Exception as e:
         await update.message.reply_text(f"❌ Erreur lors du pull : {e}")
@@ -343,9 +319,86 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+# ── Commandes admin : pause / wake ───────────────────────────────
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global BOT_EN_PAUSE
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+    if not admin_id or str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+    BOT_EN_PAUSE = True
+    await update.message.reply_text("😴 Ana est en repos…")
+
+async def cmd_wake(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global BOT_EN_PAUSE
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+    if not admin_id or str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+    BOT_EN_PAUSE = False
+    await update.message.reply_text("😏 Ana est de retour !")
+
+# ── Commande admin : retirer des points à un joueur ──────────────
+async def cmd_retirer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+
+    if not admin_id or str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "ℹ️ Usage : `/retirer <nom> <points>`\nEx : `/retirer Karl 200`",
+            parse_mode="Markdown"
+        )
+        return
+
+    *nom_parts, pts_str = context.args
+    nom = " ".join(nom_parts)
+    try:
+        montant = int(pts_str)
+        if montant <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text("❌ Le montant doit être un entier positif.")
+        return
+
+    resultat = db.retirer_points_joueur(nom, montant)
+
+    if resultat["status"] == "not_found":
+        await update.message.reply_text(f"❌ Aucun joueur trouvé pour « {nom} ».")
+    elif resultat["status"] == "multiple":
+        noms = "\n".join(f"• {n}" for n in resultat["joueurs"])
+        await update.message.reply_text(
+            f"⚠️ Plusieurs joueurs correspondent à « {nom} » :\n{noms}\n\nSois plus précis.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"⚖️ *Points retirés*\n\n"
+            f"👤 *{resultat['name']}*\n"
+            f"📉 {resultat['avant']} pts → {resultat['apres']} pts\n"
+            f"🔻 -{montant} pts",
+            parse_mode="Markdown"
+        )
+
 # ── Handler texte (vérification réponse) ────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
+        return
+    if BOT_EN_PAUSE:
         return
     chat_id   = update.effective_chat.id
     user_id, user_name = user_info(update)
@@ -369,10 +422,11 @@ def main():
     app.add_handler(CommandHandler("stop",        cmd_stop))
     app.add_handler(CommandHandler("scores",      cmd_scores))
     app.add_handler(CommandHandler("profil",      cmd_profil))
-    app.add_handler(CommandHandler("pull",        cmd_pull))
-    app.add_handler(CommandHandler("status",      cmd_status))
     app.add_handler(CommandHandler("pause",       cmd_pause))
     app.add_handler(CommandHandler("wake",        cmd_wake))
+    app.add_handler(CommandHandler("pull",        cmd_pull))
+    app.add_handler(CommandHandler("status",      cmd_status))
+    app.add_handler(CommandHandler("retirer",     cmd_retirer))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     sched.start_scheduler(app.bot)

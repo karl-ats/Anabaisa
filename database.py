@@ -170,6 +170,34 @@ def reset_hebdo():
         conn.execute("UPDATE joueurs SET pts_hebdo = 0")
         conn.execute("UPDATE hebdo_reset SET last_reset = CURRENT_TIMESTAMP WHERE id = 1")
 
+def retirer_points_joueur(nom: str, montant: int) -> dict:
+    """
+    Retire `montant` pts (alltime + hebdo) au joueur dont le nom correspond.
+    Retourne {"status": "not_found"}, {"status": "multiple", "joueurs": [...]},
+    ou {"status": "ok", "name": ..., "avant": ..., "apres": ...}.
+    """
+    with get_conn() as conn:
+        # Essai par user_id exact d'abord, sinon recherche par nom
+        rows = conn.execute(
+            "SELECT user_id, name, pts_alltime FROM joueurs WHERE user_id = ?", (nom,)
+        ).fetchall()
+        if not rows:
+            rows = conn.execute(
+                "SELECT user_id, name, pts_alltime FROM joueurs WHERE name LIKE ? COLLATE NOCASE",
+                (f"%{nom}%",)
+            ).fetchall()
+        if not rows:
+            return {"status": "not_found"}
+        if len(rows) > 1:
+            return {"status": "multiple", "joueurs": [r["name"] for r in rows]}
+        row = rows[0]
+        nouveaux_pts = max(0, row["pts_alltime"] - montant)
+        conn.execute(
+            "UPDATE joueurs SET pts_alltime = ?, pts_hebdo = MAX(0, pts_hebdo - ?) WHERE user_id = ?",
+            (nouveaux_pts, montant, row["user_id"])
+        )
+    return {"status": "ok", "name": row["name"], "avant": row["pts_alltime"], "apres": nouveaux_pts}
+
 # ── Chats enregistrés ────────────────────────────────────────────
 def save_chat(chat_id: int):
     with get_conn() as conn:
