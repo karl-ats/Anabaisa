@@ -17,10 +17,20 @@ import messages as msg
 import game as g
 import scheduler as sched
 
+# ── État global ──────────────────────────────────────────────────
+BOT_EN_PAUSE = False
+
 # ── Helpers ──────────────────────────────────────────────────────
 def user_info(update: Update):
     u = update.effective_user
     return str(u.id), u.first_name or u.username or "Anonyme"
+
+async def guard_pause(update: Update) -> bool:
+    """Retourne True si le bot est en pause (et envoie un message)."""
+    if BOT_EN_PAUSE:
+        await update.message.reply_text("😴 Ana est en repos… Revenez plus tard !")
+        return True
+    return False
 
 async def guard_no_game(update: Update, chat_id: int) -> bool:
     """Retourne True si une partie est déjà active (et envoie un message)."""
@@ -70,6 +80,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_starteasy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    if await guard_pause(update): return
     if await guard_no_game(update, chat_id):
         return
     mot, anag = await g.start_round(chat_id, "easy", context.bot)
@@ -82,6 +93,7 @@ async def cmd_starteasy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    if await guard_pause(update): return
     if await guard_no_game(update, chat_id):
         return
     mot, anag = await g.start_round(chat_id, "medium", context.bot)
@@ -94,6 +106,7 @@ async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    if await guard_pause(update): return
     if await guard_no_game(update, chat_id):
         return
     mot, anag = await g.start_round(chat_id, "hard", context.bot)
@@ -106,6 +119,7 @@ async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_tournoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
+    if await guard_pause(update): return
     if await guard_no_game(update, chat_id):
         return
 
@@ -305,6 +319,33 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+# ── Commandes admin : pause / wake ───────────────────────────────
+async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global BOT_EN_PAUSE
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+    if not admin_id or str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+    BOT_EN_PAUSE = True
+    await update.message.reply_text("😴 Ana est en repos…")
+
+async def cmd_wake(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global BOT_EN_PAUSE
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+    if not admin_id or str(user_id) != str(admin_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+    BOT_EN_PAUSE = False
+    await update.message.reply_text("😏 Ana est de retour !")
+
 # ── Commande admin : retirer des points à un joueur ──────────────
 async def cmd_retirer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
@@ -357,6 +398,8 @@ async def cmd_retirer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
+    if BOT_EN_PAUSE:
+        return
     chat_id   = update.effective_chat.id
     user_id, user_name = user_info(update)
     texte     = update.message.text
@@ -379,6 +422,8 @@ def main():
     app.add_handler(CommandHandler("stop",        cmd_stop))
     app.add_handler(CommandHandler("scores",      cmd_scores))
     app.add_handler(CommandHandler("profil",      cmd_profil))
+    app.add_handler(CommandHandler("pause",       cmd_pause))
+    app.add_handler(CommandHandler("wake",        cmd_wake))
     app.add_handler(CommandHandler("pull",        cmd_pull))
     app.add_handler(CommandHandler("status",      cmd_status))
     app.add_handler(CommandHandler("retirer",     cmd_retirer))
