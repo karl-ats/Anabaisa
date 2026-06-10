@@ -1,3 +1,5 @@
+import os, sys, asyncio, urllib.request, json, base64
+
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -187,6 +189,65 @@ async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+# ── Commande admin : pull GitHub + restart ───────────────────────
+async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, _ = user_info(update)
+    admin_id = os.environ.get("ADMIN_ID", "")
+
+    if str(user_id) != str(admin_id):
+        await update.message.reply_text("🚫 Commande réservée à l'admin.")
+        return
+
+    await update.message.reply_text("⏳ Pull GitHub en cours…")
+
+    try:
+        token = os.environ.get("GITHUB_TOKEN", "")
+
+        # Dernier commit sur main
+        req = urllib.request.Request(
+            "https://api.github.com/repos/karl-ats/Anabaisa/commits?per_page=1",
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        )
+        with urllib.request.urlopen(req) as r:
+            commits = json.loads(r.read())
+        latest_sha = commits[0]["sha"][:10]
+        latest_msg = commits[0]["commit"]["message"].split("\n")[0]
+
+        # Fichiers modifiés dans ce commit
+        req2 = urllib.request.Request(
+            f"https://api.github.com/repos/karl-ats/Anabaisa/commits/{latest_sha}",
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        )
+        with urllib.request.urlopen(req2) as r:
+            commit_data = json.loads(r.read())
+        files = [f["filename"] for f in commit_data["files"] if f["status"] != "removed"]
+
+        # Téléchargement et écrasement
+        workdir = os.path.dirname(os.path.abspath(__file__))
+        for filename in files:
+            req3 = urllib.request.Request(
+                f"https://api.github.com/repos/karl-ats/Anabaisa/contents/{filename}?ref=main",
+                headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+            )
+            with urllib.request.urlopen(req3) as r:
+                data = json.loads(r.read())
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            with open(os.path.join(workdir, filename), "w", encoding="utf-8") as f:
+                f.write(content)
+
+        await update.message.reply_text(
+            f"✅ *Pull réussi !*\n"
+            f"🔖 `{latest_sha}` — {latest_msg}\n"
+            f"📄 Fichiers : `{'`, `'.join(files)}`\n\n"
+            f"♻️ Redémarrage dans 2 secondes…",
+            parse_mode="Markdown"
+        )
+        await asyncio.sleep(2)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erreur lors du pull : {e}")
+
 # ── Handler texte (vérification réponse) ────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -213,6 +274,7 @@ def main():
     app.add_handler(CommandHandler("stop",        cmd_stop))
     app.add_handler(CommandHandler("scores",      cmd_scores))
     app.add_handler(CommandHandler("profil",      cmd_profil))
+    app.add_handler(CommandHandler("pull",        cmd_pull))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Scheduler (défi du jour, résultats, champion semaine)
