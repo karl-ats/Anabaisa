@@ -183,10 +183,11 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def cmd_scores(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    hebdo   = db.get_classement_hebdo()
-    alltime = db.get_classement_alltime()
+    hebdo     = db.get_classement_hebdo()
+    alltime   = db.get_classement_alltime()
+    victoires = db.get_classement_victoires()
     await update.message.reply_text(
-        msg.msg_scores(hebdo, alltime),
+        msg.msg_scores(hebdo, alltime, victoires),
         parse_mode="Markdown"
     )
 
@@ -319,6 +320,45 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
+# ── Commande joueur : utiliser le badge Saboteur ────────────────
+async def cmd_sabotage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, user_name = user_info(update)
+
+    if not context.args:
+        await update.message.reply_text(
+            "💣 Usage : `/sabotage <nom>`\n"
+            "Retire *20 pts* au joueur ciblé et consomme définitivement ton badge Saboteur.",
+            parse_mode="Markdown"
+        )
+        return
+
+    target = " ".join(context.args)
+    resultat = db.utiliser_saboteur(user_id, target)
+
+    if resultat["status"] == "no_badge":
+        await update.message.reply_text(
+            "❌ Tu ne possèdes pas le badge 💣 *Saboteur*.\n"
+            "_Accumule 10 victoires d'affilée pour l'obtenir !_",
+            parse_mode="Markdown"
+        )
+    elif resultat["status"] == "target_not_found":
+        await update.message.reply_text(f"❌ Joueur « {target} » introuvable.")
+    elif resultat["status"] == "multiple":
+        noms = "\n".join(f"• {n}" for n in resultat["joueurs"])
+        await update.message.reply_text(
+            f"⚠️ Plusieurs joueurs correspondent à « {target} » :\n{noms}\n\nSois plus précis."
+        )
+    elif resultat["status"] == "self_target":
+        await update.message.reply_text("😂 Tu ne peux pas te saboter toi-même !")
+    else:
+        await update.message.reply_text(
+            f"💣 *Sabotage réussi !*\n\n"
+            f"🎯 *{resultat['target_name']}* perd 20 pts\n"
+            f"📉 {resultat['avant']} pts → {resultat['apres']} pts\n\n"
+            f"_Ton badge Saboteur a été consommé._",
+            parse_mode="Markdown"
+        )
+
 # ── Commandes admin : pause / wake ───────────────────────────────
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global BOT_EN_PAUSE
@@ -421,6 +461,7 @@ def main():
     app.add_handler(CommandHandler("solution",    cmd_solution))
     app.add_handler(CommandHandler("stop",        cmd_stop))
     app.add_handler(CommandHandler("scores",      cmd_scores))
+    app.add_handler(CommandHandler("sabotage",    cmd_sabotage))
     app.add_handler(CommandHandler("profil",      cmd_profil))
     app.add_handler(CommandHandler("pause",       cmd_pause))
     app.add_handler(CommandHandler("wake",        cmd_wake))

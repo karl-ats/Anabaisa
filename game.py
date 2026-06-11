@@ -116,6 +116,7 @@ async def start_round(
         "scores_tournoi":     scores_tournoi or {},
         "hint_count":         0,
         "revealed_positions": set(),
+        "guessed_users":      set(),  # joueurs ayant tenté (pour reset streak)
     }
 
     return mot, anag
@@ -172,6 +173,10 @@ async def _solution_task(chat_id: int, bot, delay: int = 60):
 
     await bot.send_message(chat_id, msg.msg_solution(mot, "timeout", mode), parse_mode="Markdown")
 
+    guessed = game.get("guessed_users", set())
+    if guessed:
+        db.reset_streak_for_users(guessed)
+
     if mode == "tournament":
         await _next_manche_or_end(chat_id, bot)
     else:
@@ -189,6 +194,7 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
 
     mot = game["mot"]
     if nettoyer(texte) != nettoyer(mot):
+        game["guessed_users"].add(user_id)
         return False
 
     # Bonne réponse !
@@ -201,14 +207,31 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
     bonus      = elapsed < BONUS_SPEED_SECONDS
     pts_total  = pts_base + (1 if bonus else 0)
 
-    stats      = db.add_points(user_id, user_name, pts_total)
+    stats      = db.add_points(user_id, user_name, pts_total, difficulte)
     old_niveau = db.get_niveau(stats["pts_alltime"] - pts_total)
     level_up   = old_niveau != stats["niveau"]
 
-    # Badges — une seule transaction DB
+    # Reset streak des joueurs qui ont raté
+    losers = game["guessed_users"] - {user_id}
+    if losers:
+        db.reset_streak_for_users(losers)
+
+    # Badges
     earned_badges = []
+    if stats["victoires"] == 1:
+        earned_badges.append("🏅 Premier sang")
+    if elapsed < 3:
+        earned_badges.append("💨 Supersonique")
+    if stats["serie"] == 3:
+        earned_badges.append("🔥 Enflammé")
     if stats["serie"] >= 5:
         earned_badges.append("⚡ Foudre de guerre")
+    if stats["serie"] == 10:
+        earned_badges.append("💣 Saboteur")
+    if stats["victoires"] == 50:
+        earned_badges.append("🧙 Vétéran")
+    if stats["victoires_hard"] == 10:
+        earned_badges.append("🔤 Lexicomane")
     tz   = pytz.timezone(TIMEZONE)
     hour = datetime.now(tz).hour
     if 0 <= hour < 5:

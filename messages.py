@@ -3,12 +3,12 @@ from config import POINTS, BONUS_SPEED_SECONDS, hint_timing_str
 
 # ── Relances taquines ───────────────────────────────────────────
 TAUNTS = [
-    "😴 Vous dormez ou quoi ? C'est pas si dur !",
+    "😴 Ndjiki a déjà bu ? Aurore dit qu'il est dur comme cet anagramme !",
     "🤔 Toujours personne... le chat a avalé vos cerveaux ?",
-    "👀 Je vous vois hésiter... lancez-vous !",
-    "😏 C'est un mot français, promis. Cherchez encore !",
-    "🦗 ...Crickets. Quelqu'un est encore là ?",
-    "🧠 Faites chauffer les neurones, ça commence à sentir le brûlé !",
+    "👀 Vos cerveaux sont-ils si vides comme celui de Franck ?",
+    "😏 La bêtise de Kiua vous contamine ? Ekie",
+    "🦗 ...Crickets. les choses que Togo trouvent facilement ?",
+    "🧠 Je vois les neurones de Rayan partout, ça empeste !",
     "⏳ Le temps tourne... et vous, vous rêvez ?",
     "🙈 Personne ? Vraiment personne ? Même pas un essai ?",
 ]
@@ -103,10 +103,10 @@ def msg_fin_tournoi(scores_tournoi: dict) -> str:
     return "\n".join(lignes)
 
 # ── Classements ─────────────────────────────────────────────────
-def msg_scores(hebdo: list, alltime: list) -> str:
+def msg_scores(hebdo: list, alltime: list, victoires: list) -> str:
     medailles = ["🥇", "🥈", "🥉"]
 
-    def format_liste(joueurs):
+    def format_pts(joueurs):
         if not joueurs:
             return "_Aucun score encore_"
         lignes = []
@@ -115,12 +115,24 @@ def msg_scores(hebdo: list, alltime: list) -> str:
             lignes.append(f"{med} *{j['name']}* — {j['points']} pts · {j['niveau']}")
         return "\n".join(lignes)
 
+    def format_victoires(joueurs):
+        if not joueurs:
+            return "_Aucun score encore_"
+        lignes = []
+        for i, j in enumerate(joueurs[:10]):
+            med = medailles[i] if i < 3 else f"{i+1}."
+            lignes.append(f"{med} *{j['name']}* — {j['victoires']} victoires · {j['niveau']}")
+        return "\n".join(lignes)
+
     return (
         f"📊 *CLASSEMENT HEBDOMADAIRE* (reset lundi)\n\n"
-        f"{format_liste(hebdo)}\n\n"
+        f"{format_pts(hebdo)}\n\n"
         f"━━━━━━━━━━━━━━━━━\n\n"
-        f"🏛️ *CLASSEMENT ALL-TIME*\n\n"
-        f"{format_liste(alltime)}"
+        f"🏛️ *CLASSEMENT ALL-TIME (points)*\n\n"
+        f"{format_pts(alltime)}\n\n"
+        f"━━━━━━━━━━━━━━━━━\n\n"
+        f"🏆 *CLASSEMENT VICTOIRES*\n\n"
+        f"{format_victoires(victoires)}"
     )
 
 # ── Défi du jour ─────────────────────────────────────────────────
@@ -171,7 +183,7 @@ def msg_profil(name: str, pts_alltime: int, pts_hebdo: int, victoires: int, seri
         f"💰 Points all-time : *{pts_alltime} pts*\n"
         f"📅 Points cette semaine : *{pts_hebdo} pts*\n"
         f"🏆 Victoires : *{victoires}*\n"
-        f"🔥 Série en cours : *{serie}*\n\n"
+        f"🔥 Série actuelle : *{serie}* victoire{'s' if serie > 1 else ''} d'affilée\n\n"
         f"🎖️ *Badges :*\n{badges_str}"
     )
 

@@ -63,6 +63,12 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_pts_hebdo   ON joueurs(pts_hebdo   DESC);
             CREATE INDEX IF NOT EXISTS idx_pts_alltime ON joueurs(pts_alltime DESC);
         """)
+    # Migration : colonne victoires_hard (idempotente)
+    try:
+        with get_conn() as conn:
+            conn.execute("ALTER TABLE joueurs ADD COLUMN victoires_hard INTEGER DEFAULT 0")
+    except Exception:
+        pass
 
 # ── Joueurs ─────────────────────────────────────────────────────
 def get_niveau(pts: int) -> str:
@@ -77,27 +83,31 @@ def get_joueur_name(user_id: str) -> str:
         row = conn.execute("SELECT name FROM joueurs WHERE user_id = ?", (user_id,)).fetchone()
     return row["name"] if row else "Inconnu"
 
-def add_points(user_id: str, name: str, pts: int) -> dict:
+def add_points(user_id: str, name: str, pts: int, difficulte: str = "easy") -> dict:
+    hard_incr = 1 if difficulte == "hard" else 0
     with get_conn() as conn:
         conn.execute("""
-            INSERT INTO joueurs (user_id, name, pts_alltime, pts_hebdo, victoires, serie)
-            VALUES (?, ?, ?, ?, 1, 1)
+            INSERT INTO joueurs (user_id, name, pts_alltime, pts_hebdo, victoires, serie, victoires_hard)
+            VALUES (?, ?, ?, ?, 1, 1, ?)
             ON CONFLICT(user_id) DO UPDATE SET
-                name        = excluded.name,
-                pts_alltime = pts_alltime + ?,
-                pts_hebdo   = pts_hebdo   + ?,
-                victoires   = victoires   + 1,
-                serie       = serie       + 1
-        """, (user_id, name, pts, pts, pts, pts))
+                name           = excluded.name,
+                pts_alltime    = pts_alltime    + ?,
+                pts_hebdo      = pts_hebdo      + ?,
+                victoires      = victoires      + 1,
+                serie          = serie          + 1,
+                victoires_hard = victoires_hard + ?
+        """, (user_id, name, pts, pts, hard_incr, pts, pts, hard_incr))
         row = conn.execute(
-            "SELECT pts_alltime, pts_hebdo, serie FROM joueurs WHERE user_id = ?",
+            "SELECT pts_alltime, pts_hebdo, serie, victoires, victoires_hard FROM joueurs WHERE user_id = ?",
             (user_id,)
         ).fetchone()
     return {
-        "pts_alltime": row["pts_alltime"],
-        "pts_hebdo":   row["pts_hebdo"],
-        "serie":       row["serie"],
-        "niveau":      get_niveau(row["pts_alltime"]),
+        "pts_alltime":    row["pts_alltime"],
+        "pts_hebdo":      row["pts_hebdo"],
+        "serie":          row["serie"],
+        "victoires":      row["victoires"],
+        "victoires_hard": row["victoires_hard"],
+        "niveau":         get_niveau(row["pts_alltime"]),
     }
 
 def get_profil(user_id: str) -> dict | None:
@@ -113,6 +123,14 @@ def get_profil(user_id: str) -> dict | None:
 def reset_serie(user_id: str):
     with get_conn() as conn:
         conn.execute("UPDATE joueurs SET serie = 0 WHERE user_id = ?", (user_id,))
+
+def reset_streak_for_users(user_ids: set):
+    """Remet serie à 0 pour tous les joueurs qui ont raté la partie (n'ont pas gagné)."""
+    if not user_ids:
+        return
+    with get_conn() as conn:
+        for uid in user_ids:
+            conn.execute("UPDATE joueurs SET serie = 0 WHERE user_id = ?", (uid,))
 
 def add_badge(user_id: str, badge: str):
     add_badges(user_id, [badge])
@@ -144,6 +162,17 @@ def get_classement_hebdo(limit: int = 10) -> list:
             LIMIT ?
         """, (limit,)).fetchall()
     return [{"name": r["name"], "points": r["points"], "niveau": get_niveau(r["pts_alltime"])} for r in rows]
+
+def get_classement_victoires(limit: int = 10) -> list:
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT name, victoires, pts_alltime
+            FROM joueurs
+            WHERE victoires > 0
+            ORDER BY victoires DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+    return [{"name": r["name"], "victoires": r["victoires"], "niveau": get_niveau(r["pts_alltime"])} for r in rows]
 
 def get_classement_alltime(limit: int = 10) -> list:
     with get_conn() as conn:
@@ -197,6 +226,43 @@ def retirer_points_joueur(nom: str, montant: int) -> dict:
             (nouveaux_pts, montant, row["user_id"])
         )
     return {"status": "ok", "name": row["name"], "avant": row["pts_alltime"], "apres": nouveaux_pts}
+
+def utiliser_saboteur(user_id: str, target_nom: str) -> dict:
+    """Consomme le badge Saboteur de user_id et retire 20 pts à la cible."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT badges FROM joueurs WHERE user_id = ?", (user_id,)).fetchone()
+        if not row:
+            return {"status": "no_badge"}
+        badges = json.loads(row["badges"]) if row["badges"] else []
+        if "💣 Saboteur" not in badges:
+            return {"status": "no_badge"}
+
+        cible_rows = conn.execute(
+            "SELECT user_id, name, pts_alltime FROM joueurs WHERE user_id = ?", (target_nom,)
+        ).fetchall()
+        if not cible_rows:
+            cible_rows = conn.execute(
+                "SELECT user_id, name, pts_alltime FROM joueurs WHERE name LIKE ? COLLATE NOCASE",
+                (f"%{target_nom}%",)
+            ).fetchall()
+        if not cible_rows:
+            return {"status": "target_not_found"}
+        if len(cible_rows) > 1:
+            return {"status": "multiple", "joueurs": [r["name"] for r in cible_rows]}
+        cible = cible_rows[0]
+        if cible["user_id"] == user_id:
+            return {"status": "self_target"}
+
+        badges.remove("💣 Saboteur")
+        conn.execute("UPDATE joueurs SET badges = ? WHERE user_id = ?",
+                     (json.dumps(badges), user_id))
+        nouveaux_pts = max(0, cible["pts_alltime"] - 20)
+        conn.execute(
+            "UPDATE joueurs SET pts_alltime = ?, pts_hebdo = MAX(0, pts_hebdo - 20) WHERE user_id = ?",
+            (nouveaux_pts, cible["user_id"])
+        )
+    return {"status": "ok", "target_name": cible["name"],
+            "avant": cible["pts_alltime"], "apres": nouveaux_pts}
 
 # ── Chats enregistrés ────────────────────────────────────────────
 def save_chat(chat_id: int):
