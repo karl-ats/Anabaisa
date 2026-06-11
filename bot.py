@@ -269,7 +269,7 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         await asyncio.sleep(2)
-        sys.exit(0)
+        os._exit(0)
 
     except Exception as e:
         await update.message.reply_text(f"❌ Erreur lors du pull : {e}")
