@@ -26,14 +26,12 @@ def user_info(update: Update):
     return str(u.id), u.first_name or u.username or "Anonyme"
 
 async def guard_pause(update: Update) -> bool:
-    """Retourne True si le bot est en pause (et envoie un message)."""
     if BOT_EN_PAUSE:
         await update.message.reply_text("😴 Ana est en repos… Revenez plus tard !")
         return True
     return False
 
 async def guard_no_game(update: Update, chat_id: int) -> bool:
-    """Retourne True si une partie est déjà active (et envoie un message)."""
     game = g.GAMES.get(chat_id)
     if game and game.get("actif"):
         anag = game["anagramme"]
@@ -47,6 +45,20 @@ async def guard_no_game(update: Update, chat_id: int) -> bool:
         )
         return True
     return False
+
+def is_admin(user_id: str) -> bool:
+    admin_id = os.environ.get("ADMIN_ID", "")
+    return bool(admin_id) and str(user_id) == str(admin_id)
+
+def extract_target(context) -> str | None:
+    """Extrait la cible depuis les args : nom direct ou @mention."""
+    if not context.args:
+        return None
+    raw = " ".join(context.args)
+    # Retire le @ si présent en premier mot
+    if context.args[0].startswith("@"):
+        return context.args[0][1:] if len(context.args) == 1 else " ".join([context.args[0][1:]] + context.args[1:])
+    return raw
 
 # ── Commandes de base ─────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,10 +78,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🏟️ *Tournois :*\n"
         "• /tournoi easy | medium | hard\n\n"
         "📋 *Autres :*\n"
-        "• /indice — 💡 Un petit indice (juste pour toi 😉)\n"
+        "• /indice — 💡 Un petit indice\n"
         "• /solution — 🏳️ Révéler la solution\n"
-        "• /scores — 🏆 Classements hebdo + all-time\n"
+        "• /topscore — 🏛️ Classement all-time (points)\n"
+        "• /topwin — 🏆 Classement all-time (victoires)\n"
         "• /profil — 👤 Tes stats et badges\n"
+        "• /sabotage <nom> — 💣 Utiliser le badge Saboteur\n"
+        "• /prestige <nom> — 👑 Utiliser le badge Prestige\n"
+        "• /prolongation — ⏱️ Prolonger la partie en cours\n"
         "• /stop — ⛔ Arrêter la partie\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
         "🌅 *Défi du jour automatique à 9h00 !*\n\n"
@@ -81,8 +97,7 @@ async def cmd_starteasy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
     if await guard_pause(update): return
-    if await guard_no_game(update, chat_id):
-        return
+    if await guard_no_game(update, chat_id): return
     mot, anag = await g.start_round(chat_id, "easy", context.bot)
     await update.message.reply_text(
         msg.msg_nouvelle_partie(anag, "easy", len(mot)),
@@ -94,8 +109,7 @@ async def cmd_startmedium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
     if await guard_pause(update): return
-    if await guard_no_game(update, chat_id):
-        return
+    if await guard_no_game(update, chat_id): return
     mot, anag = await g.start_round(chat_id, "medium", context.bot)
     await update.message.reply_text(
         msg.msg_nouvelle_partie(anag, "medium", len(mot)),
@@ -107,8 +121,7 @@ async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
     if await guard_pause(update): return
-    if await guard_no_game(update, chat_id):
-        return
+    if await guard_no_game(update, chat_id): return
     mot, anag = await g.start_round(chat_id, "hard", context.bot)
     await update.message.reply_text(
         msg.msg_nouvelle_partie(anag, "hard", len(mot)),
@@ -120,14 +133,11 @@ async def cmd_tournoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     sched.register_chat(chat_id)
     if await guard_pause(update): return
-    if await guard_no_game(update, chat_id):
-        return
+    if await guard_no_game(update, chat_id): return
 
     args = context.args
     if not args or args[0].lower() not in ("easy", "medium", "hard"):
-        await update.message.reply_text(
-            "⚠️ Usage : /tournoi easy | medium | hard"
-        )
+        await update.message.reply_text("⚠️ Usage : /tournoi easy | medium | hard")
         return
 
     difficulte = args[0].lower()
@@ -139,6 +149,8 @@ async def cmd_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not game or not game.get("actif"):
         await update.message.reply_text("❌ Aucune partie en cours. Tapez /starteasy !")
         return
+    # Annule les indices automatiques pour éviter les doublons
+    g.cancel_hint_tasks(chat_id)
     result = g.give_hint(chat_id)
     if result is None:
         max_h = g.MAX_HINTS.get(game["difficulte"], 1)
@@ -182,23 +194,53 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-async def cmd_scores(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    hebdo     = db.get_classement_hebdo()
-    alltime   = db.get_classement_alltime()
-    victoires = db.get_classement_victoires()
+# ── Classements ──────────────────────────────────────────────────
+async def cmd_topscore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_id, _ = user_info(update)
+    classement, rang, mes_pts = db.get_topscore(chat_id, user_id)
     await update.message.reply_text(
-        msg.msg_scores(hebdo, alltime, victoires),
+        msg.msg_topscore(classement, rang, mes_pts),
         parse_mode="Markdown"
     )
 
+async def cmd_topwin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_id, _ = user_info(update)
+    classement, rang, mes_victoires = db.get_topwin(chat_id, user_id)
+    await update.message.reply_text(
+        msg.msg_topwin(classement, rang, mes_victoires),
+        parse_mode="Markdown"
+    )
+
+# ── Profil ───────────────────────────────────────────────────────
 async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
-    profil = db.get_profil(user_id)
-    if not profil:
-        await update.message.reply_text(
-            "❌ Tu n'as pas encore joué ! Lance /starteasy pour commencer."
-        )
-        return
+
+    # Support /profil @Karl ou /profil Karl
+    target = extract_target(context)
+    if target:
+        profil = db.get_profil(target)
+        if not profil:
+            # Essai par nom
+            with db.get_conn() as conn:
+                row = conn.execute(
+                    "SELECT user_id FROM joueurs WHERE name LIKE ? COLLATE NOCASE LIMIT 1",
+                    (f"%{target}%",)
+                ).fetchone()
+            if row:
+                profil = db.get_profil(row["user_id"])
+        if not profil:
+            await update.message.reply_text(f"❌ Joueur « {target} » introuvable.")
+            return
+    else:
+        profil = db.get_profil(user_id)
+        if not profil:
+            await update.message.reply_text(
+                "❌ Tu n'as pas encore joué ! Lance /starteasy pour commencer."
+            )
+            return
+
     await update.message.reply_text(
         msg.msg_profil(
             profil["name"], profil["pts_alltime"], profil["pts_hebdo"],
@@ -206,6 +248,119 @@ async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ),
         parse_mode="Markdown"
     )
+
+# ── Badge : Saboteur ─────────────────────────────────────────────
+async def cmd_sabotage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, user_name = user_info(update)
+
+    target = extract_target(context)
+    if not target:
+        await update.message.reply_text(
+            "💣 Usage : `/sabotage <nom>` ou `/sabotage @pseudo`\n"
+            "Retire *20 pts* au joueur ciblé et consomme ton badge 💣 Saboteur.\n"
+            "_(La cible perd son badge 🛡️ Bouclier si elle en a un !)_",
+            parse_mode="Markdown"
+        )
+        return
+
+    resultat = db.utiliser_saboteur(user_id, target)
+
+    if resultat["status"] == "no_badge":
+        await update.message.reply_text(
+            "❌ Tu ne possèdes pas le badge 💣 *Saboteur*.\n"
+            "_Accumule 10 victoires d'affilée pour en obtenir un !_",
+            parse_mode="Markdown"
+        )
+    elif resultat["status"] == "target_not_found":
+        await update.message.reply_text(f"❌ Joueur « {target} » introuvable.")
+    elif resultat["status"] == "multiple":
+        noms = "\n".join(f"• {n}" for n in resultat["joueurs"])
+        await update.message.reply_text(
+            f"⚠️ Plusieurs joueurs correspondent à « {target} » :\n{noms}\n\nSois plus précis."
+        )
+    elif resultat["status"] == "self_target":
+        await update.message.reply_text("😂 Tu ne peux pas te saboter toi-même !")
+    elif resultat["status"] == "blocked":
+        await update.message.reply_text(
+            f"🛡️ *Sabotage bloqué !*\n\n"
+            f"*{resultat['target_name']}* avait un 🛡️ Bouclier — il a absorbé l'attaque !\n"
+            f"_Ton badge Saboteur a quand même été consommé._",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(
+            f"💣 *Sabotage réussi !*\n\n"
+            f"🎯 *{resultat['target_name']}* perd 20 pts\n"
+            f"📉 {resultat['avant']} pts → {resultat['apres']} pts\n\n"
+            f"_Ton badge Saboteur a été consommé._",
+            parse_mode="Markdown"
+        )
+
+# ── Badge : Prestige ─────────────────────────────────────────────
+async def cmd_prestige(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, user_name = user_info(update)
+
+    target = extract_target(context)
+    if not target:
+        await update.message.reply_text(
+            "👑 Usage : `/prestige <nom>` ou `/prestige @pseudo`\n"
+            "Offre *30 pts* au joueur ciblé (prélevés sur ton score) et consomme ton badge 👑 Prestige.",
+            parse_mode="Markdown"
+        )
+        return
+
+    resultat = db.utiliser_prestige(user_id, target)
+
+    if resultat["status"] == "no_badge":
+        await update.message.reply_text(
+            "❌ Tu ne possèdes pas le badge 👑 *Prestige*.\n"
+            "_Ce badge est offert au champion de la semaine chaque lundi !_",
+            parse_mode="Markdown"
+        )
+    elif resultat["status"] == "target_not_found":
+        await update.message.reply_text(f"❌ Joueur « {target} » introuvable.")
+    elif resultat["status"] == "multiple":
+        noms = "\n".join(f"• {n}" for n in resultat["joueurs"])
+        await update.message.reply_text(
+            f"⚠️ Plusieurs joueurs correspondent à « {target} » :\n{noms}\n\nSois plus précis."
+        )
+    elif resultat["status"] == "self_target":
+        await update.message.reply_text("😂 Tu ne peux pas te transférer des points à toi-même !")
+    else:
+        await update.message.reply_text(
+            f"👑 *Prestige accordé !*\n\n"
+            f"Tu offres *30 pts* à *{resultat['target_name']}*\n"
+            f"_Ton badge Prestige a été consommé._",
+            parse_mode="Markdown"
+        )
+
+# ── Badge : Prolongation ─────────────────────────────────────────
+async def cmd_prolongation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_id, _ = user_info(update)
+
+    if not g.GAMES.get(chat_id, {}).get("actif"):
+        await update.message.reply_text("❌ Aucune partie en cours à prolonger.")
+        return
+
+    if not db.has_badge(user_id, "⏱️ Prolongation"):
+        await update.message.reply_text(
+            "❌ Tu ne possèdes pas le badge ⏱️ *Prolongation*.\n"
+            "_Ce badge est offert aux vainqueurs de tournoi !_",
+            parse_mode="Markdown"
+        )
+        return
+
+    db.remove_badge(user_id, "⏱️ Prolongation")
+    ok = await g.extend_game(chat_id, 30, context.bot)
+    if ok:
+        await update.message.reply_text(
+            "⏱️ *Prolongation activée !* +30 secondes sur le chrono.\n"
+            "_Ton badge Prolongation a été consommé._",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("❌ Impossible de prolonger la partie.")
 
 # ── Commande admin : pull GitHub + restart ───────────────────────
 async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -216,12 +371,12 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"⚙️ *ADMIN\\_ID non configuré.*\n\n"
             f"Ton ID Telegram est : `{user_id}`\n\n"
-            f"Copie ce nombre et configure-le comme secret `ADMIN_ID` dans Replit.",
+            f"Copie ce nombre et configure-le comme secret `ADMIN_ID` dans Render.",
             parse_mode="Markdown"
         )
         return
 
-    if str(user_id) != str(admin_id):
+    if not is_admin(user_id):
         await update.message.reply_text(
             f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
             parse_mode="Markdown"
@@ -278,9 +433,7 @@ async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Commande admin : statut du bot ───────────────────────────────
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
-    admin_id = os.environ.get("ADMIN_ID", "")
-
-    if not admin_id or str(user_id) != str(admin_id):
+    if not is_admin(user_id):
         await update.message.reply_text(
             f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
             parse_mode="Markdown"
@@ -320,51 +473,11 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
-# ── Commande joueur : utiliser le badge Saboteur ────────────────
-async def cmd_sabotage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id, user_name = user_info(update)
-
-    if not context.args:
-        await update.message.reply_text(
-            "💣 Usage : `/sabotage <nom>`\n"
-            "Retire *20 pts* au joueur ciblé et consomme définitivement ton badge Saboteur.",
-            parse_mode="Markdown"
-        )
-        return
-
-    target = " ".join(context.args)
-    resultat = db.utiliser_saboteur(user_id, target)
-
-    if resultat["status"] == "no_badge":
-        await update.message.reply_text(
-            "❌ Tu ne possèdes pas le badge 💣 *Saboteur*.\n"
-            "_Accumule 10 victoires d'affilée pour l'obtenir !_",
-            parse_mode="Markdown"
-        )
-    elif resultat["status"] == "target_not_found":
-        await update.message.reply_text(f"❌ Joueur « {target} » introuvable.")
-    elif resultat["status"] == "multiple":
-        noms = "\n".join(f"• {n}" for n in resultat["joueurs"])
-        await update.message.reply_text(
-            f"⚠️ Plusieurs joueurs correspondent à « {target} » :\n{noms}\n\nSois plus précis."
-        )
-    elif resultat["status"] == "self_target":
-        await update.message.reply_text("😂 Tu ne peux pas te saboter toi-même !")
-    else:
-        await update.message.reply_text(
-            f"💣 *Sabotage réussi !*\n\n"
-            f"🎯 *{resultat['target_name']}* perd 20 pts\n"
-            f"📉 {resultat['avant']} pts → {resultat['apres']} pts\n\n"
-            f"_Ton badge Saboteur a été consommé._",
-            parse_mode="Markdown"
-        )
-
-# ── Commandes admin : pause / wake ───────────────────────────────
+# ── Commande admin : pause / wake ───────────────────────────────
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global BOT_EN_PAUSE
     user_id, _ = user_info(update)
-    admin_id = os.environ.get("ADMIN_ID", "")
-    if not admin_id or str(user_id) != str(admin_id):
+    if not is_admin(user_id):
         await update.message.reply_text(
             f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
             parse_mode="Markdown"
@@ -376,8 +489,7 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_wake(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global BOT_EN_PAUSE
     user_id, _ = user_info(update)
-    admin_id = os.environ.get("ADMIN_ID", "")
-    if not admin_id or str(user_id) != str(admin_id):
+    if not is_admin(user_id):
         await update.message.reply_text(
             f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
             parse_mode="Markdown"
@@ -389,9 +501,7 @@ async def cmd_wake(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Commande admin : retirer des points à un joueur ──────────────
 async def cmd_retirer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
-    admin_id = os.environ.get("ADMIN_ID", "")
-
-    if not admin_id or str(user_id) != str(admin_id):
+    if not is_admin(user_id):
         await update.message.reply_text(
             f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
             parse_mode="Markdown"
@@ -400,7 +510,7 @@ async def cmd_retirer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(context.args) < 2:
         await update.message.reply_text(
-            "ℹ️ Usage : `/retirer <nom> <points>`\nEx : `/retirer Karl 200`",
+            "ℹ️ Usage : `/retirer <nom|id> <points>`\nEx : `/retirer Karl 200`",
             parse_mode="Markdown"
         )
         return
@@ -451,28 +561,31 @@ def main():
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    app.add_handler(CommandHandler("start",       cmd_start))
-    app.add_handler(CommandHandler("startAna",    cmd_start))
-    app.add_handler(CommandHandler("starteasy",   cmd_starteasy))
-    app.add_handler(CommandHandler("startmedium", cmd_startmedium))
-    app.add_handler(CommandHandler("starthard",   cmd_starthard))
-    app.add_handler(CommandHandler("tournoi",     cmd_tournoi))
-    app.add_handler(CommandHandler("indice",      cmd_indice))
-    app.add_handler(CommandHandler("solution",    cmd_solution))
-    app.add_handler(CommandHandler("stop",        cmd_stop))
-    app.add_handler(CommandHandler("scores",      cmd_scores))
-    app.add_handler(CommandHandler("sabotage",    cmd_sabotage))
-    app.add_handler(CommandHandler("profil",      cmd_profil))
-    app.add_handler(CommandHandler("pause",       cmd_pause))
-    app.add_handler(CommandHandler("wake",        cmd_wake))
-    app.add_handler(CommandHandler("pull",        cmd_pull))
-    app.add_handler(CommandHandler("status",      cmd_status))
-    app.add_handler(CommandHandler("retirer",     cmd_retirer))
+    app.add_handler(CommandHandler("start",        cmd_start))
+    app.add_handler(CommandHandler("startAna",     cmd_start))
+    app.add_handler(CommandHandler("starteasy",    cmd_starteasy))
+    app.add_handler(CommandHandler("startmedium",  cmd_startmedium))
+    app.add_handler(CommandHandler("starthard",    cmd_starthard))
+    app.add_handler(CommandHandler("tournoi",      cmd_tournoi))
+    app.add_handler(CommandHandler("indice",       cmd_indice))
+    app.add_handler(CommandHandler("solution",     cmd_solution))
+    app.add_handler(CommandHandler("stop",         cmd_stop))
+    app.add_handler(CommandHandler("topscore",     cmd_topscore))
+    app.add_handler(CommandHandler("topwin",       cmd_topwin))
+    app.add_handler(CommandHandler("profil",       cmd_profil))
+    app.add_handler(CommandHandler("sabotage",     cmd_sabotage))
+    app.add_handler(CommandHandler("prestige",     cmd_prestige))
+    app.add_handler(CommandHandler("prolongation", cmd_prolongation))
+    app.add_handler(CommandHandler("pause",        cmd_pause))
+    app.add_handler(CommandHandler("wake",         cmd_wake))
+    app.add_handler(CommandHandler("pull",         cmd_pull))
+    app.add_handler(CommandHandler("status",       cmd_status))
+    app.add_handler(CommandHandler("retirer",      cmd_retirer))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     sched.start_scheduler(app.bot)
 
-    print("🤖 Bot Anagramme v2 démarré !")
+    print("🤖 Bot Anagramme v3 démarré !")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":

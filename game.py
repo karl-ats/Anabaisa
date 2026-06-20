@@ -63,30 +63,27 @@ def nettoyer(texte: str) -> str:
     return unicodedata.normalize("NFD", texte).encode("ascii", "ignore").decode()
 
 # ── État global ──────────────────────────────────────────────────
-# Structure par chat_id :
-# {
-#   "mode":             "quick" | "tournament" | "daily",
-#   "difficulte":       "easy" | "medium" | "hard",
-#   "mot":              str,
-#   "anagramme":        str,
-#   "actif":            bool,
-#   "start_time":       float | None,   # None jusqu'à start_tasks
-#   "tasks":            [asyncio.Task, ...],
-#   "manche":           int,            # tournoi uniquement
-#   "scores_tournoi":   {user_id: {"name": str, "pts": int}},
-#   "hint_count":       int,
-#   "revealed_positions": set,
-# }
 GAMES: dict = {}
 
 def _cancel_tasks_sync(chat_id: int):
-    """Annule les tâches en cours sans await (safe depuis contexte sync ou async)."""
-    for t in GAMES.get(chat_id, {}).get("tasks", []):
+    game = GAMES.get(chat_id, {})
+    for t in game.get("hint_tasks", []) + game.get("tasks", []):
         if not t.done():
             t.cancel()
+    sol = game.get("solution_task")
+    if sol and not sol.done():
+        sol.cancel()
 
 async def _cancel_tasks(chat_id: int):
     _cancel_tasks_sync(chat_id)
+
+def cancel_hint_tasks(chat_id: int):
+    """Annule uniquement les tâches d'indice auto (appelé par /indice manuel)."""
+    game = GAMES.get(chat_id, {})
+    for t in game.get("hint_tasks", []):
+        if not t.done():
+            t.cancel()
+    game["hint_tasks"] = []
 
 # ── Lancement partie ─────────────────────────────────────────────
 async def start_round(
@@ -110,13 +107,15 @@ async def start_round(
         "mot":                mot,
         "anagramme":          anag,
         "actif":              True,
-        "start_time":         None,   # défini dans start_tasks
-        "tasks":              [],
+        "start_time":         None,
+        "tasks":              [],      # taunt task
+        "hint_tasks":         [],      # hint tasks (annulables séparément)
+        "solution_task":      None,
         "manche":             manche,
         "scores_tournoi":     scores_tournoi or {},
         "hint_count":         0,
         "revealed_positions": set(),
-        "guessed_users":      set(),  # joueurs ayant tenté (pour reset streak)
+        "guessed_users":      set(),
     }
 
     return mot, anag
@@ -131,11 +130,10 @@ def start_tasks(chat_id: int, bot):
     sol_delay   = SOLUTION_DELAY.get(diff, 60)
     hint_delays = HINT_SCHEDULE.get(diff, [15])
     loop = asyncio.get_running_loop()
-    tasks = [loop.create_task(_taunt_task(chat_id, bot))]
-    for delay in hint_delays:
-        tasks.append(loop.create_task(_hint_task(chat_id, bot, delay)))
-    tasks.append(loop.create_task(_solution_task(chat_id, bot, sol_delay)))
-    game["tasks"] = tasks
+
+    game["tasks"] = [loop.create_task(_taunt_task(chat_id, bot))]
+    game["hint_tasks"] = [loop.create_task(_hint_task(chat_id, bot, d)) for d in hint_delays]
+    game["solution_task"] = loop.create_task(_solution_task(chat_id, bot, sol_delay))
 
 # ── Tâches chronométrées ─────────────────────────────────────────
 async def _taunt_task(chat_id: int, bot):
@@ -167,7 +165,7 @@ async def _solution_task(chat_id: int, bot, delay: int = 60):
     GAMES[chat_id]["actif"] = False
 
     current = asyncio.current_task()
-    for t in game.get("tasks", []):
+    for t in game.get("tasks", []) + game.get("hint_tasks", []):
         if not t.done() and t is not current:
             t.cancel()
 
@@ -182,13 +180,34 @@ async def _solution_task(chat_id: int, bot, delay: int = 60):
     else:
         GAMES.pop(chat_id, None)
 
+# ── Extension de temps (badge Prolongation) ──────────────────────
+async def extend_game(chat_id: int, seconds: int, bot):
+    """Prolonge la partie en cours de `seconds` secondes."""
+    game = GAMES.get(chat_id)
+    if not game or not game.get("actif"):
+        return False
+
+    # Annule l'ancien task solution
+    old_sol = game.get("solution_task")
+    if old_sol and not old_sol.done():
+        old_sol.cancel()
+
+    # Calcule le délai restant + extension
+    diff = game["difficulte"]
+    elapsed = time.time() - (game["start_time"] or time.time())
+    original_delay = SOLUTION_DELAY.get(diff, 60)
+    remaining = max(5, original_delay - elapsed + seconds)
+
+    loop = asyncio.get_running_loop()
+    game["solution_task"] = loop.create_task(_solution_task(chat_id, bot, remaining))
+    return True
+
 # ── Vérification réponse ─────────────────────────────────────────
 async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, bot) -> bool:
     game = GAMES.get(chat_id)
     if not game or not game["actif"]:
         return False
 
-    # Guard : message reçu avant que start_tasks ait initialisé le chrono
     if game["start_time"] is None:
         return False
 
@@ -207,16 +226,24 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
     bonus      = elapsed < BONUS_SPEED_SECONDS
     pts_total  = pts_base + (1 if bonus else 0)
 
+    # Badge Doubleur passif : double les pts si actif
+    if db.has_badge(user_id, "💥 Doubleur"):
+        pts_total *= 2
+        db.remove_badge(user_id, "💥 Doubleur")
+
     stats      = db.add_points(user_id, user_name, pts_total, difficulte)
     old_niveau = db.get_niveau(stats["pts_alltime"] - pts_total)
     level_up   = old_niveau != stats["niveau"]
+
+    # Enregistre la partie pour les classements par groupe
+    db.save_partie(chat_id, user_id, mot, difficulte, elapsed)
 
     # Reset streak des joueurs qui ont raté
     losers = game["guessed_users"] - {user_id}
     if losers:
         db.reset_streak_for_users(losers)
 
-    # Badges
+    # ── Badges permanents ──────────────────────────────────────────
     earned_badges = []
     if stats["victoires"] == 1:
         earned_badges.append("🏅 Premier sang")
@@ -226,8 +253,6 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
         earned_badges.append("🔥 Enflammé")
     if stats["serie"] >= 5:
         earned_badges.append("⚡ Foudre de guerre")
-    if stats["serie"] == 10:
-        earned_badges.append("💣 Saboteur")
     if stats["victoires"] == 50:
         earned_badges.append("🧙 Vétéran")
     if stats["victoires_hard"] == 10:
@@ -240,6 +265,21 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
     if elapsed < first_hint_delay:
         earned_badges.append("🎯 Sans indice")
     newly_earned = db.add_badges(user_id, earned_badges)
+
+    # ── Badges consommables ────────────────────────────────────────
+    if stats["serie"] == 7:
+        db.add_consumable_badge(user_id, "💥 Doubleur")
+        newly_earned.append("💥 Doubleur")
+    if stats["serie"] == 15:
+        db.add_consumable_badge(user_id, "🔄 Renaissance")
+        newly_earned.append("🔄 Renaissance")
+    if stats["victoires"] > 0 and stats["victoires"] % 25 == 0:
+        db.add_consumable_badge(user_id, "🛡️ Bouclier")
+        newly_earned.append("🛡️ Bouclier")
+    # Saboteur (à la 10e victoire d'affilée) — déjà consommable, on le traite ici
+    if stats["serie"] == 10:
+        db.add_consumable_badge(user_id, "💣 Saboteur")
+        newly_earned.append("💣 Saboteur")
 
     await bot.send_message(
         chat_id,
@@ -269,7 +309,6 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
         st[user_id]["pts"] += pts_total
         await _next_manche_or_end(chat_id, bot)
     else:
-        # Nettoyer l'état pour les modes quick et daily
         if game["mode"] == "daily":
             db.set_defi_gagnant(date.today().isoformat(), user_id, pts_total)
         GAMES.pop(chat_id, None)
@@ -284,7 +323,6 @@ async def start_tournament(chat_id: int, difficulte: str, bot):
         parse_mode="Markdown"
     )
     await asyncio.sleep(3)
-    # Guard : une autre partie a pu démarrer pendant le countdown
     if GAMES.get(chat_id, {}).get("actif"):
         return
     await _launch_manche(chat_id, difficulte, bot, manche=1, scores_tournoi={})
@@ -307,21 +345,22 @@ async def _next_manche_or_end(chat_id: int, bot):
 
     if manche >= TOURNAMENT_ROUNDS:
         await asyncio.sleep(2)
-        # /stop a pu être appelé pendant le sommeil
         if chat_id not in GAMES:
             return
         await bot.send_message(chat_id, msg.msg_fin_tournoi(scores), parse_mode="Markdown")
+        # Récompense le vainqueur du tournoi
+        if scores:
+            winner_id = max(scores, key=lambda uid: scores[uid]["pts"])
+            db.add_victoire_tournoi(winner_id)
         GAMES.pop(chat_id, None)
     else:
         await asyncio.sleep(3)
-        # /stop a pu être appelé pendant le sommeil
         if chat_id not in GAMES:
             return
         await _launch_manche(chat_id, difficulte, bot, manche + 1, scores)
 
 # ── Stop ─────────────────────────────────────────────────────────
 async def stop_game(chat_id: int) -> dict | None:
-    """Retourne les infos de la partie en cours, ou None si aucune partie active."""
     game = GAMES.get(chat_id)
     if not game or not game.get("actif"):
         return None

@@ -1,4 +1,5 @@
 import random
+from collections import Counter
 from config import POINTS, BONUS_SPEED_SECONDS, hint_timing_str
 
 # ── Relances taquines ───────────────────────────────────────────
@@ -100,39 +101,49 @@ def msg_fin_tournoi(scores_tournoi: dict) -> str:
 
     gagnant = classement[0][1]["name"]
     lignes.append(f"\n🎊 Félicitations à *{gagnant}* pour cette victoire !")
+    lignes.append(f"_+1 victoire de tournoi · Badge ⏱️ Prolongation offert !_")
     return "\n".join(lignes)
 
-# ── Classements ─────────────────────────────────────────────────
-def msg_scores(hebdo: list, alltime: list, victoires: list) -> str:
-    medailles = ["🥇", "🥈", "🥉"]
+# ── Classements par groupe ───────────────────────────────────────
+def _format_rang(rang) -> str:
+    if rang is None:
+        return ""
+    return f"\n\n_Ton rang : #{rang}_"
 
-    def format_pts(joueurs):
-        if not joueurs:
-            return "_Aucun score encore_"
+def msg_topscore(classement: list, rang, mes_pts: int) -> str:
+    medailles = ["🥇", "🥈", "🥉"]
+    if not classement:
+        lignes_str = "_Aucun score encore dans ce groupe_"
+    else:
         lignes = []
-        for i, j in enumerate(joueurs[:10]):
+        for i, j in enumerate(classement):
             med = medailles[i] if i < 3 else f"{i+1}."
             lignes.append(f"{med} *{j['name']}* — {j['points']} pts · {j['niveau']}")
-        return "\n".join(lignes)
+        lignes_str = "\n".join(lignes)
 
-    def format_victoires(joueurs):
-        if not joueurs:
-            return "_Aucun score encore_"
+    rang_txt = _format_rang(rang)
+    return (
+        f"🏛️ *TOP SCORES — All Time*\n\n"
+        f"{lignes_str}"
+        f"{rang_txt}"
+    )
+
+def msg_topwin(classement: list, rang, mes_victoires: int) -> str:
+    medailles = ["🥇", "🥈", "🥉"]
+    if not classement:
+        lignes_str = "_Aucune victoire encore dans ce groupe_"
+    else:
         lignes = []
-        for i, j in enumerate(joueurs[:10]):
+        for i, j in enumerate(classement):
             med = medailles[i] if i < 3 else f"{i+1}."
             lignes.append(f"{med} *{j['name']}* — {j['victoires']} victoires · {j['niveau']}")
-        return "\n".join(lignes)
+        lignes_str = "\n".join(lignes)
 
+    rang_txt = _format_rang(rang)
     return (
-        f"📊 *CLASSEMENT HEBDOMADAIRE* (reset lundi)\n\n"
-        f"{format_pts(hebdo)}\n\n"
-        f"━━━━━━━━━━━━━━━━━\n\n"
-        f"🏛️ *CLASSEMENT ALL-TIME (points)*\n\n"
-        f"{format_pts(alltime)}\n\n"
-        f"━━━━━━━━━━━━━━━━━\n\n"
-        f"🏆 *CLASSEMENT VICTOIRES*\n\n"
-        f"{format_victoires(victoires)}"
+        f"🏆 *TOP VICTOIRES — All Time*\n\n"
+        f"{lignes_str}"
+        f"{rang_txt}"
     )
 
 # ── Défi du jour ─────────────────────────────────────────────────
@@ -167,7 +178,8 @@ def msg_defi_non_resolu(mot: str) -> str:
 def msg_champion_semaine(nom: str, pts: int) -> str:
     return (
         f"🏆 *CHAMPION DE LA SEMAINE !*\n\n"
-        f"👑 *{nom}* remporte la semaine avec *{pts} points* !\n\n"
+        f"👑 *{nom}* remporte la semaine avec *{pts} points* !\n"
+        f"_Badge 👑 Prestige offert — à utiliser avec /prestige !_\n\n"
         f"Bravo ! Une nouvelle semaine commence... Qui sera le prochain champion ? 🎯"
     )
 
@@ -175,8 +187,20 @@ def msg_relance() -> str:
     return random.choice(TAUNTS)
 
 # ── Profil joueur ────────────────────────────────────────────────
+def _format_badges(badges: list) -> str:
+    if not badges:
+        return "_Aucun badge encore_"
+    counts = Counter(badges)
+    parts = []
+    for badge, n in counts.items():
+        if n > 1:
+            parts.append(f"{badge} ×{n}")
+        else:
+            parts.append(badge)
+    return "  ".join(parts)
+
 def msg_profil(name: str, pts_alltime: int, pts_hebdo: int, victoires: int, serie: int, badges: list, niveau: str) -> str:
-    badges_str = "  ".join(badges) if badges else "_Aucun badge encore_"
+    badges_str = _format_badges(badges)
     return (
         f"👤 *Profil de {name}*\n\n"
         f"🏅 Niveau : {niveau}\n"

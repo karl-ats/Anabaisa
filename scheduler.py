@@ -109,6 +109,10 @@ async def send_weekly_champion(bot):
     for chat_id, result in zip(chats, results):
         if isinstance(result, Exception):
             print(f"[Scheduler] Erreur champion chat {chat_id}: {result}")
+
+    if champion:
+        db.add_consumable_badge(champion["user_id"], "👑 Prestige")
+
     db.reset_hebdo()
 
 # ── Démarrage scheduler ───────────────────────────────────────────
