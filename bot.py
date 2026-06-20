@@ -362,32 +362,30 @@ async def cmd_prolongation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Impossible de prolonger la partie.")
 
-RELEASE_MESSAGE = """🆕 *Ana s'est mis à jour — voici les nouveautés !*
+RELEASE_MESSAGE = """🆕 *Ana s'est mis à jour !*
 
 🏆 *Classements par groupe*
-Les classements /topscore et /topwin sont maintenant propres à chaque groupe\!
-➕ Ton rang personnel s'affiche en bas\.
+/topscore et /topwin sont maintenant filtrés par groupe + ton rang personnel s'affiche.
 
 🎖️ *Nouveaux badges*
-• 💥 Doubleur — à la 7e victoire d'affilée : double tes pts sur le prochain mot
-• 🔄 Renaissance — à la 15e d'affilée : survit à une défaite \(série repart à 1\)
-• 🛡️ Bouclier — tous les 25 victoires : bloque un Sabotage
-• ⏱️ Prolongation — offert au vainqueur de tournoi : \+30s sur la partie
-• 👑 Prestige — champion de la semaine : transfère 30 pts à un joueur de ton choix
+💥 Doubleur — 7 victoires d'affilée : double tes pts sur le prochain mot
+🔄 Renaissance — 15 d'affilée : survit à une défaite (série repart à 1)
+🛡️ Bouclier — tous les 25 victoires : bloque un Sabotage
+⏱️ Prolongation — vainqueur de tournoi : +30s sur la partie
+👑 Prestige — champion de la semaine : transfère 30 pts à qui tu veux
 
-Les badges consommables s'affichent maintenant *💣 Saboteur ×2* si tu en as plusieurs\!
+Les badges en double s'affichent maintenant *Saboteur x2* dans ton profil.
 
 📌 *Nouvelles commandes*
-• /topscore — classement all\-time points \(groupe\)
-• /topwin — classement all\-time victoires \(groupe\)
-• /profil @nom — voir le profil d'un autre joueur
-• /sabotage @nom — cibler par @pseudo
-• /prestige — offrir 30 pts à un joueur
-• /prolongation — prolonger la partie active
+/topscore — classement all-time points
+/topwin — classement all-time victoires
+/profil @nom — voir le profil d'un autre joueur
+/prestige — offrir 30 pts à un joueur
+/prolongation — prolonger la partie active
 
-💡 /indice ne déclenche plus les indices auto en double\.
+💡 /indice ne déclenche plus les indices automatiques en double.
 
-Bonne chance \! 😏"""
+Bonne chance ! 😏"""
 
 # ── Commande admin : broadcast ───────────────────────────────────
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -400,21 +398,21 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     texte = " ".join(context.args) if context.args else RELEASE_MESSAGE
-    parse = "MarkdownV2" if not context.args else "Markdown"
 
     chats = db.get_all_chats()
-    ok, ko = 0, 0
+    ok, ko, errors = 0, 0, []
     for chat_id in chats:
         try:
-            await context.bot.send_message(chat_id, texte, parse_mode=parse)
+            await context.bot.send_message(chat_id, texte, parse_mode="Markdown")
             ok += 1
         except Exception as e:
-            print(f"[broadcast] chat {chat_id} KO : {e}")
+            errors.append(f"• `{chat_id}` : {e}")
             ko += 1
 
-    await update.message.reply_text(
-        f"📣 Broadcast terminé : {ok} envoyé(s), {ko} échec(s)."
-    )
+    rapport = f"📣 Broadcast terminé : {ok} envoyé(s), {ko} échec(s)."
+    if errors:
+        rapport += "\n\n*Erreurs :*\n" + "\n".join(errors[:10])
+    await update.message.reply_text(rapport, parse_mode="Markdown")
 
 # ── Commande admin : pull GitHub + restart ───────────────────────
 async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
