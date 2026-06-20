@@ -362,6 +362,60 @@ async def cmd_prolongation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Impossible de prolonger la partie.")
 
+RELEASE_MESSAGE = """🆕 *Ana s'est mis à jour — voici les nouveautés !*
+
+🏆 *Classements par groupe*
+Les classements /topscore et /topwin sont maintenant propres à chaque groupe\!
+➕ Ton rang personnel s'affiche en bas\.
+
+🎖️ *Nouveaux badges*
+• 💥 Doubleur — à la 7e victoire d'affilée : double tes pts sur le prochain mot
+• 🔄 Renaissance — à la 15e d'affilée : survit à une défaite \(série repart à 1\)
+• 🛡️ Bouclier — tous les 25 victoires : bloque un Sabotage
+• ⏱️ Prolongation — offert au vainqueur de tournoi : \+30s sur la partie
+• 👑 Prestige — champion de la semaine : transfère 30 pts à un joueur de ton choix
+
+Les badges consommables s'affichent maintenant *💣 Saboteur ×2* si tu en as plusieurs\!
+
+📌 *Nouvelles commandes*
+• /topscore — classement all\-time points \(groupe\)
+• /topwin — classement all\-time victoires \(groupe\)
+• /profil @nom — voir le profil d'un autre joueur
+• /sabotage @nom — cibler par @pseudo
+• /prestige — offrir 30 pts à un joueur
+• /prolongation — prolonger la partie active
+
+💡 /indice ne déclenche plus les indices auto en double\.
+
+Bonne chance \! 😏"""
+
+# ── Commande admin : broadcast ───────────────────────────────────
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, _ = user_info(update)
+    if not is_admin(user_id):
+        await update.message.reply_text(
+            f"🚫 Commande réservée à l'admin.\n_(ton ID : `{user_id}`)_",
+            parse_mode="Markdown"
+        )
+        return
+
+    texte = " ".join(context.args) if context.args else RELEASE_MESSAGE
+    parse = "MarkdownV2" if not context.args else "Markdown"
+
+    chats = db.get_all_chats()
+    ok, ko = 0, 0
+    for chat_id in chats:
+        try:
+            await context.bot.send_message(chat_id, texte, parse_mode=parse)
+            ok += 1
+        except Exception as e:
+            print(f"[broadcast] chat {chat_id} KO : {e}")
+            ko += 1
+
+    await update.message.reply_text(
+        f"📣 Broadcast terminé : {ok} envoyé(s), {ko} échec(s)."
+    )
+
 # ── Commande admin : pull GitHub + restart ───────────────────────
 async def cmd_pull(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
@@ -576,6 +630,7 @@ def main():
     app.add_handler(CommandHandler("sabotage",     cmd_sabotage))
     app.add_handler(CommandHandler("prestige",     cmd_prestige))
     app.add_handler(CommandHandler("prolongation", cmd_prolongation))
+    app.add_handler(CommandHandler("broadcast",    cmd_broadcast))
     app.add_handler(CommandHandler("pause",        cmd_pause))
     app.add_handler(CommandHandler("wake",         cmd_wake))
     app.add_handler(CommandHandler("pull",         cmd_pull))
