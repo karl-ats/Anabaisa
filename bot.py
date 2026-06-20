@@ -216,24 +216,41 @@ async def cmd_topwin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Profil ───────────────────────────────────────────────────────
 async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, _ = user_info(update)
+    target_id = None
 
-    # Support /profil @Karl ou /profil Karl
-    target = extract_target(context)
-    if target:
-        profil = db.get_profil(target)
+    # Cas 1 : reply sur le message d'un joueur → son profil
+    reply = update.message.reply_to_message
+    if reply and reply.from_user:
+        target_id = str(reply.from_user.id)
+
+    # Cas 2 : mention @nom via entity Telegram (text_mention = lien sans @username)
+    if not target_id and update.message.entities:
+        for entity in update.message.entities:
+            if entity.type == "text_mention" and entity.user:
+                target_id = str(entity.user.id)
+                break
+
+    if target_id:
+        profil = db.get_profil(target_id)
         if not profil:
-            # Essai par nom
-            with db.get_conn() as conn:
-                row = conn.execute(
-                    "SELECT user_id FROM joueurs WHERE name LIKE ? COLLATE NOCASE LIMIT 1",
-                    (f"%{target}%",)
-                ).fetchone()
-            if row:
-                profil = db.get_profil(row["user_id"])
-        if not profil:
+            await update.message.reply_text("❌ Ce joueur n'a pas encore joué !")
+            return
+
+    elif context.args:
+        # Cas 3 : /profil @username ou /profil Prénom → recherche par nom
+        target = extract_target(context)
+        with db.get_conn() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM joueurs WHERE name LIKE ? COLLATE NOCASE LIMIT 1",
+                (f"%{target}%",)
+            ).fetchone()
+        if not row:
             await update.message.reply_text(f"❌ Joueur « {target} » introuvable.")
             return
+        profil = db.get_profil(row["user_id"])
+
     else:
+        # Cas 4 : son propre profil
         profil = db.get_profil(user_id)
         if not profil:
             await update.message.reply_text(
