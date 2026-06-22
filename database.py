@@ -138,24 +138,31 @@ def reset_serie(user_id: str):
     with get_conn() as conn:
         conn.execute("UPDATE joueurs SET serie = 0 WHERE user_id = ?", (user_id,))
 
-def reset_streak_for_users(user_ids: set):
-    """Remet serie à 0 (ou 1 si Renaissance actif) pour les joueurs qui ont raté."""
-    if not user_ids:
+def _reset_streak_uid(conn, uid: str):
+    """Réinitialise la série d'un joueur (avec gestion Renaissance). Connexion fournie."""
+    row = conn.execute("SELECT badges FROM joueurs WHERE user_id = ?", (uid,)).fetchone()
+    if not row:
         return
+    badges = json.loads(row["badges"]) if row["badges"] else []
+    if "🔄 Renaissance" in badges:
+        badges.remove("🔄 Renaissance")
+        conn.execute(
+            "UPDATE joueurs SET serie = 1, badges = ? WHERE user_id = ?",
+            (json.dumps(badges), uid)
+        )
+    else:
+        conn.execute("UPDATE joueurs SET serie = 0 WHERE user_id = ?", (uid,))
+
+def reset_streak_for_chat_losers(chat_id: int, winner_id: str):
+    """Remet la série à 0 pour tous les joueurs actifs du groupe sauf le gagnant.
+    Passer winner_id='' pour un timeout où personne n'a gagné."""
     with get_conn() as conn:
-        for uid in user_ids:
-            row = conn.execute("SELECT badges FROM joueurs WHERE user_id = ?", (uid,)).fetchone()
-            if not row:
-                continue
-            badges = json.loads(row["badges"]) if row["badges"] else []
-            if "🔄 Renaissance" in badges:
-                badges.remove("🔄 Renaissance")
-                conn.execute(
-                    "UPDATE joueurs SET serie = 1, badges = ? WHERE user_id = ?",
-                    (json.dumps(badges), uid)
-                )
-            else:
-                conn.execute("UPDATE joueurs SET serie = 0 WHERE user_id = ?", (uid,))
+        rows = conn.execute(
+            "SELECT DISTINCT gagnant_id FROM parties WHERE chat_id = ? AND gagnant_id IS NOT NULL AND gagnant_id != ?",
+            (str(chat_id), winner_id)
+        ).fetchall()
+        for row in rows:
+            _reset_streak_uid(conn, row["gagnant_id"])
 
 # ── Badges permanents ────────────────────────────────────────────
 def add_badge(user_id: str, badge: str):

@@ -12,6 +12,8 @@ TAUNTS = [
     "🧠 Je vois les neurones de Rayan partout, ça empeste !",
     "⏳ Le temps tourne... et vous, vous rêvez ?",
     "🙈 Personne ? Vraiment personne ? Même pas un essai ?",
+    "💤 Hermann dort encore ? Même lui aurait trouvé depuis longtemps...",
+    "🐢 À ce rythme, Aniel va finir par vous donner la réponse par pitié !",
 ]
 
 # ── Réactions selon la vitesse ─────────────────────────────────

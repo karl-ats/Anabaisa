@@ -171,9 +171,8 @@ async def _solution_task(chat_id: int, bot, delay: int = 60):
 
     await bot.send_message(chat_id, msg.msg_solution(mot, "timeout", mode), parse_mode="Markdown")
 
-    guessed = game.get("guessed_users", set())
-    if guessed:
-        db.reset_streak_for_users(guessed)
+    # Reset streak de tous les joueurs actifs du groupe (personne n'a gagné)
+    db.reset_streak_for_chat_losers(chat_id, "")
 
     if mode == "tournament":
         await _next_manche_or_end(chat_id, bot)
@@ -238,10 +237,8 @@ async def check_answer(chat_id: int, user_id: str, user_name: str, texte: str, b
     # Enregistre la partie pour les classements par groupe
     db.save_partie(chat_id, user_id, mot, difficulte, elapsed)
 
-    # Reset streak des joueurs qui ont raté
-    losers = game["guessed_users"] - {user_id}
-    if losers:
-        db.reset_streak_for_users(losers)
+    # Reset streak de tous les joueurs actifs du groupe sauf le gagnant
+    db.reset_streak_for_chat_losers(chat_id, user_id)
 
     # ── Badges permanents ──────────────────────────────────────────
     earned_badges = []

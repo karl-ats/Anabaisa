@@ -266,16 +266,33 @@ async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+# ── Helpers mention/reply ────────────────────────────────────────
+def resolve_target(update: Update, context) -> str | None:
+    """Retourne l'identifiant de la cible (user_id ou nom) depuis reply, entity ou args."""
+    # Priorité 1 : reply sur un message
+    reply = update.message.reply_to_message
+    if reply and reply.from_user:
+        return str(reply.from_user.id)
+    # Priorité 2 : mention @nom avec entity Telegram (text_mention → user_id dispo)
+    if update.message.entities:
+        for entity in update.message.entities:
+            if entity.type == "text_mention" and entity.user:
+                return str(entity.user.id)
+    # Priorité 3 : args texte
+    return extract_target(context)
+
 # ── Badge : Saboteur ─────────────────────────────────────────────
 async def cmd_sabotage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, user_name = user_info(update)
 
-    target = extract_target(context)
+    target = resolve_target(update, context)
     if not target:
         await update.message.reply_text(
-            "💣 Usage : `/sabotage <nom>` ou `/sabotage @pseudo`\n"
-            "Retire *20 pts* au joueur ciblé et consomme ton badge 💣 Saboteur.\n"
-            "_(La cible perd son badge 🛡️ Bouclier si elle en a un !)_",
+            "💣 *Usage :*\n"
+            "• Réponds au message d'un joueur + `/sabotage`\n"
+            "• `/sabotage @pseudo` ou `/sabotage Prénom`\n\n"
+            "Retire *20 pts* et consomme ton badge 💣 Saboteur.\n"
+            "_(La cible perd son 🛡️ Bouclier si elle en a un !)_",
             parse_mode="Markdown"
         )
         return
@@ -317,11 +334,13 @@ async def cmd_sabotage(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_prestige(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id, user_name = user_info(update)
 
-    target = extract_target(context)
+    target = resolve_target(update, context)
     if not target:
         await update.message.reply_text(
-            "👑 Usage : `/prestige <nom>` ou `/prestige @pseudo`\n"
-            "Offre *30 pts* au joueur ciblé (prélevés sur ton score) et consomme ton badge 👑 Prestige.",
+            "👑 *Usage :*\n"
+            "• Réponds au message d'un joueur + `/prestige`\n"
+            "• `/prestige @pseudo` ou `/prestige Prénom`\n\n"
+            "Offre *30 pts* (prélevés sur ton score) et consomme ton badge 👑 Prestige.",
             parse_mode="Markdown"
         )
         return
@@ -382,7 +401,7 @@ async def cmd_prolongation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 RELEASE_MESSAGE = """🆕 *Ana s'est mis à jour !*
 
 🏆 *Classements par groupe*
-/topscore et /topwin sont maintenant filtrés par groupe + ton rang personnel s'affiche.
+/topscore et /topwin sont filtrés par groupe + ton rang personnel s'affiche en bas.
 
 🎖️ *Nouveaux badges*
 💥 Doubleur — 7 victoires d'affilée : double tes pts sur le prochain mot
@@ -391,16 +410,19 @@ RELEASE_MESSAGE = """🆕 *Ana s'est mis à jour !*
 ⏱️ Prolongation — vainqueur de tournoi : +30s sur la partie
 👑 Prestige — champion de la semaine : transfère 30 pts à qui tu veux
 
-Les badges en double s'affichent maintenant *Saboteur x2* dans ton profil.
+Les badges en double s'affichent *Saboteur x2* dans ton /profil.
 
 📌 *Nouvelles commandes*
 /topscore — classement all-time points
 /topwin — classement all-time victoires
-/profil @nom — voir le profil d'un autre joueur
-/prestige — offrir 30 pts à un joueur
+/profil @nom — profil d'un autre joueur (ou réponds à son message)
+/sabotage — réponds au message de ta cible pour l'utiliser
+/prestige — réponds au message de ta cible pour l'utiliser
 /prolongation — prolonger la partie active
 
-💡 /indice ne déclenche plus les indices automatiques en double.
+💡 *Corrections*
+La série se remet à zéro correctement quand quelqu'un d'autre gagne.
+/indice ne déclenche plus les indices automatiques en double.
 
 Bonne chance ! 😏"""
 
