@@ -459,6 +459,19 @@ async def cmd_prolongation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 RELEASE_MESSAGE = """🆕 *Ana s'est mis à jour !*
 
+🏟 *NOUVEAU : Mode Arène*
+Le tournoi classique laisse place à l'arène par élimination !
+
+/arene easy|medium|hard <mise> — ouvrir une arène (mise optionnelle)
+/join — rejoindre pendant le lobby de 30s
+
+Chaque manche, le joueur avec le moins de pts est éliminé. Égalité = mort subite.
+
+Gains : 2 joueurs → winner takes all · 3+ joueurs → finaliste remboursé, gagnant empoche le reste.
+
+/profil, /sabotage, /prestige : réponds au message d'un joueur pour le cibler.
+/topscore et /topwin filtrés par groupe avec ton rang affiché.
+
 Bonne chance ! 😏"""
 
 # ── Commande admin : broadcast ───────────────────────────────────
