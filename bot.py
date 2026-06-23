@@ -75,16 +75,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /starteasy — 😊 Facile (≤6 lettres · 1 pt)\n"
         "• /startmedium — 🔥 Moyen (7–9 lettres · 2 pts)\n"
         "• /starthard — 💀 Difficile (10+ lettres · 3 pts)\n\n"
-        "🏟️ *Tournois :*\n"
-        "• /tournoi easy | medium | hard\n\n"
+        "🏟️ *Arène (élimination) :*\n"
+        "• /arene easy|medium|hard <mise> — lancer une arène\n"
+        "• /join — rejoindre une arène ouverte\n\n"
         "📋 *Autres :*\n"
         "• /indice — 💡 Un petit indice\n"
         "• /solution — 🏳️ Révéler la solution\n"
         "• /topscore — 🏛️ Classement all-time (points)\n"
         "• /topwin — 🏆 Classement all-time (victoires)\n"
         "• /profil — 👤 Tes stats et badges\n"
-        "• /sabotage <nom> — 💣 Utiliser le badge Saboteur\n"
-        "• /prestige <nom> — 👑 Utiliser le badge Prestige\n"
+        "• /sabotage — 💣 Utiliser le badge Saboteur\n"
+        "• /prestige — 👑 Utiliser le badge Prestige\n"
         "• /prolongation — ⏱️ Prolonger la partie en cours\n"
         "• /stop — ⛔ Arrêter la partie\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -129,19 +130,6 @@ async def cmd_starthard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     g.start_tasks(chat_id, context.bot)
 
-async def cmd_tournoi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    sched.register_chat(chat_id)
-    if await guard_pause(update): return
-    if await guard_no_game(update, chat_id): return
-
-    args = context.args
-    if not args or args[0].lower() not in ("easy", "medium", "hard"):
-        await update.message.reply_text("⚠️ Usage : /tournoi easy | medium | hard")
-        return
-
-    difficulte = args[0].lower()
-    await g.start_tournament(chat_id, difficulte, context.bot)
 
 async def cmd_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -471,32 +459,6 @@ async def cmd_prolongation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 RELEASE_MESSAGE = """🆕 *Ana s'est mis à jour !*
 
-🏟️ *NOUVEAU : Mode Arène*
-Un tournoi par élimination avec mise ! Chaque manche, le joueur avec le moins de points risque d'être éliminé. Égalité = mort subite.
-
-/arene easy|medium|hard <mise> — lancer une arène
-/join — rejoindre une arène ouverte
-
-🏆 *Prix :* le gagnant empoche tout le pot · le finaliste récupère sa mise.
-
-🎖️ *Nouveaux badges*
-💥 Doubleur — 7 victoires d'affilée : double tes pts
-🔄 Renaissance — 15 d'affilée : survit à une défaite
-🛡️ Bouclier — tous les 25 victoires : bloque un Sabotage
-⏱️ Prolongation — vainqueur de tournoi : +30s
-👑 Prestige — champion de la semaine : transfère 30 pts
-🛡️ Immunité — survivre à un duel d'arène : protège d'une élimination
-🗡️ Finaliste — atteindre la finale d'arène
-🏟️ Gladiateur — remporter une arène
-💰 Parieur — participer à une arène avec mise
-
-Les badges en double s'affichent *Saboteur x2* dans ton /profil.
-
-📌 *Autres nouveautés*
-/topscore et /topwin filtrés par groupe + ton rang
-/profil, /sabotage, /prestige : réponds au message de quelqu'un pour le cibler
-La série se réinitialise correctement quand quelqu'un d'autre gagne.
-
 Bonne chance ! 😏"""
 
 # ── Commande admin : broadcast ───────────────────────────────────
@@ -732,13 +694,13 @@ def main():
     app.add_handler(CommandHandler("starteasy",    cmd_starteasy))
     app.add_handler(CommandHandler("startmedium",  cmd_startmedium))
     app.add_handler(CommandHandler("starthard",    cmd_starthard))
-    app.add_handler(CommandHandler("tournoi",      cmd_tournoi))
+
     app.add_handler(CommandHandler("indice",       cmd_indice))
     app.add_handler(CommandHandler("solution",     cmd_solution))
     app.add_handler(CommandHandler("stop",         cmd_stop))
     app.add_handler(CommandHandler("arene",         cmd_arene))
     app.add_handler(CommandHandler("join",          cmd_join))
-    app.add_handler(CommandHandler("topscore",      cmd_topscore))
+    app.add_handler(CommandHandler("topscore",     cmd_topscore))
     app.add_handler(CommandHandler("topwin",       cmd_topwin))
     app.add_handler(CommandHandler("profil",       cmd_profil))
     app.add_handler(CommandHandler("sabotage",     cmd_sabotage))

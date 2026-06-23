@@ -408,7 +408,19 @@ async def join_arena(chat_id: int, user_id: str, name: str) -> str:
     return "ok"
 
 async def _arena_lobby_task(chat_id: int, bot):
-    await asyncio.sleep(30)
+    await asyncio.sleep(15)
+    if ARENAS.get(chat_id, {}).get("phase") == "lobby":
+        nb = len(ARENAS[chat_id]["joueurs"])
+        await bot.send_message(chat_id,
+            f"⏰ *15 secondes restantes !* ({nb} joueur(s) inscrit(s)) — /join pour participer !",
+            parse_mode="Markdown")
+    await asyncio.sleep(10)
+    if ARENAS.get(chat_id, {}).get("phase") == "lobby":
+        nb = len(ARENAS[chat_id]["joueurs"])
+        await bot.send_message(chat_id,
+            f"⚠️ *5 secondes !* ({nb} joueur(s)) — dernière chance !",
+            parse_mode="Markdown")
+    await asyncio.sleep(5)
     arena = ARENAS.get(chat_id)
     if not arena or arena["phase"] != "lobby":
         return
@@ -535,13 +547,20 @@ async def _arena_eliminer(chat_id: int, user_id: str, bot, from_duel: bool = Fal
     del arena["joueurs"][user_id]
 
     if len(arena["joueurs"]) == 1:
-        # Celui qu'on vient d'éliminer = finaliste
-        if arena["mise"] > 0:
+        deux_joueurs = len(arena["elimines"]) == 1  # seulement 1 éliminé = duel 1v1
+        if not deux_joueurs and arena["mise"] > 0:
+            # 3+ joueurs : Option C — finaliste récupère sa mise (retirée du pot)
+            arena["pot"] -= arena["mise"]
             db.ajuster_pts_brut(user_id, arena["mise"])
         db.add_badges(user_id, ["🗡️ Finaliste"])
-        await bot.send_message(chat_id,
-            f"🗡️ *{nom}* est éliminé(e) — *Finaliste !* Mise remboursée + badge 🗡️",
-            parse_mode="Markdown")
+        if deux_joueurs:
+            await bot.send_message(chat_id,
+                f"🗡️ *{nom}* est éliminé(e) — *Finaliste !* Badge 🗡️ décerné.",
+                parse_mode="Markdown")
+        else:
+            await bot.send_message(chat_id,
+                f"🗡️ *{nom}* est éliminé(e) — *Finaliste !* Mise remboursée + badge 🗡️",
+                parse_mode="Markdown")
         await asyncio.sleep(2)
         await _arena_end(chat_id, bot)
     else:
