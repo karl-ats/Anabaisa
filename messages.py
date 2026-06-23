@@ -245,18 +245,19 @@ def msg_arena_start(nb_joueurs: int, difficulte: str, pot: int, mise: int) -> st
         f"⚔️ *{nb_joueurs} gladiateurs* entrent en lice !\n"
         f"🔥 Difficulté : {labels[difficulte]}\n"
         f"{pot_txt}\n\n"
-        f"Le joueur avec le moins de points risque l'élimination à chaque manche.\n"
-        f"Égalité → mort subite !\n\n"
+        f"{'5 manches' if nb_joueurs > 2 else '3 manches'} par phase avant élimination · Égalité → mort subite · Finale en 3 manches\n"
+        f"🏆 Winner takes all !\n\n"
         f"_Que le meilleur gagne !_ 🗡️"
     )
 
-def msg_arena_manche(num: int, anagramme: str, difficulte: str, nb_lettres: int, joueurs: dict) -> str:
+def msg_arena_manche(phase_num: int, phase_max: int, anagramme: str, difficulte: str, nb_lettres: int, joueurs: dict) -> str:
     labels = {"easy": "😊 Facile", "medium": "🔥 Moyen", "hard": "💀 Difficile"}
     pts = POINTS[difficulte]
     scores_sorted = sorted(joueurs.items(), key=lambda x: x[1]["pts"], reverse=True)
     scores_str = "  |  ".join(f"{j['name']} *{j['pts']}pt*" for _, j in scores_sorted)
+    label = "Finale" if phase_max == 3 else "Phase"
     return (
-        f"⚔️ *Manche {num}*\n\n"
+        f"⚔️ *{label} — Manche {phase_num}/{phase_max}*\n\n"
         f"➡️  *{anagramme.upper()}*\n\n"
         f"📏 {nb_lettres} lettres · {labels[difficulte]} · *{pts} pt{'s' if pts > 1 else ''}*\n\n"
         f"📊 {scores_str}"

@@ -386,6 +386,7 @@ async def start_arena(chat_id: int, difficulte: str, mise: int, org_id: str, org
         "organisateur_id": org_id, "phase": "lobby",
         "joueurs": {org_id: {"name": org_name, "pts": 0}},
         "elimines": [], "manche": 0,
+        "manche_phase": 0, "manche_phase_max": 5,
         "duel_mode": False, "duel_joueurs": set(),
         "pot": mise, "lobby_task": None,
     }
@@ -437,6 +438,7 @@ async def _arena_lobby_task(chat_id: int, bot):
     arena["phase"] = "manche"
     nb  = len(arena["joueurs"])
     pot = arena["pot"]
+    arena["manche_phase_max"] = 3 if nb == 2 else 5
     await bot.send_message(chat_id, msg.msg_arena_start(nb, arena["difficulte"], pot, arena["mise"]), parse_mode="Markdown")
     await asyncio.sleep(3)
     if chat_id in ARENAS:
@@ -447,12 +449,17 @@ async def _arena_start_round(chat_id: int, bot):
     if not arena:
         return
     arena["manche"] += 1
+    if not arena["duel_mode"]:
+        arena["manche_phase"] += 1
     mot, anag = await start_round(chat_id, arena["difficulte"], bot, mode="arena")
     if arena["duel_mode"]:
         noms = [arena["joueurs"][uid]["name"] for uid in arena["duel_joueurs"] if uid in arena["joueurs"]]
         await bot.send_message(chat_id, msg.msg_arena_duel(noms, anag, arena["difficulte"], len(mot)), parse_mode="Markdown")
     else:
-        await bot.send_message(chat_id, msg.msg_arena_manche(arena["manche"], anag, arena["difficulte"], len(mot), arena["joueurs"]), parse_mode="Markdown")
+        await bot.send_message(chat_id, msg.msg_arena_manche(
+            arena["manche_phase"], arena["manche_phase_max"],
+            anag, arena["difficulte"], len(mot), arena["joueurs"]
+        ), parse_mode="Markdown")
     start_tasks(chat_id, bot)
 
 async def check_arena_answer(chat_id: int, user_id: str, user_name: str, texte: str, bot) -> bool:
@@ -504,22 +511,56 @@ async def _arena_after_round(chat_id: int, bot, winner_id: str | None):
     if len(joueurs) <= 1:
         await _arena_end(chat_id, bot)
         return
+
+    # Timeout pendant un duel → on relance le même duel
+    if arena["duel_mode"]:
+        await bot.send_message(chat_id, "⏱️ Personne n'a trouvé — le duel repart !")
+        await asyncio.sleep(2)
+        if chat_id in ARENAS:
+            await _arena_start_round(chat_id, bot)
+        return
+
+    # Phase pas encore terminée → manche suivante
+    if arena["manche_phase"] < arena["manche_phase_max"]:
+        await asyncio.sleep(2)
+        if chat_id in ARENAS:
+            await _arena_start_round(chat_id, bot)
+        return
+
+    # Phase terminée — bilan et élimination
+    scores_txt = "\n".join(
+        f"• *{j['name']}* : {j['pts']} pt(s)"
+        for j in sorted(joueurs.values(), key=lambda x: -x["pts"])
+    )
+    label = "Finale" if len(joueurs) == 2 else f"Phase ({arena['manche_phase_max']} manches)"
+    await bot.send_message(chat_id,
+        f"📊 *Bilan — {label}*\n{scores_txt}",
+        parse_mode="Markdown")
+    await asyncio.sleep(2)
+    if chat_id not in ARENAS:
+        return
+
     min_pts  = min(j["pts"] for j in joueurs.values())
     perdants = [uid for uid, j in joueurs.items() if j["pts"] == min_pts]
+
     if len(perdants) == len(joueurs):
-        # Tout le monde à égalité → rejouer sans élimination
+        # Égalité parfaite → reset et rejouer la phase
+        await bot.send_message(chat_id, "🤝 Égalité parfaite — on rejoue la phase !")
+        arena["manche_phase"] = 0
+        for uid in joueurs:
+            joueurs[uid]["pts"] = 0
         await asyncio.sleep(2)
         if chat_id in ARENAS:
             await _arena_start_round(chat_id, bot)
     elif len(perdants) == 1:
         await _arena_eliminer(chat_id, perdants[0], bot)
     else:
-        arena["duel_mode"] = True
-        arena["duel_joueurs"] = set(perdants)
         noms = [joueurs[uid]["name"] for uid in perdants]
         await bot.send_message(chat_id,
-            f"⚔️ Égalité entre {' et '.join('*'+n+'*' for n in noms)} — *mort subite !*",
+            f"⚔️ Égalité en bas du classement entre {' et '.join('*'+n+'*' for n in noms)} — *mort subite !*",
             parse_mode="Markdown")
+        arena["duel_mode"] = True
+        arena["duel_joueurs"] = set(perdants)
         await asyncio.sleep(3)
         if chat_id in ARENAS:
             await _arena_start_round(chat_id, bot)
@@ -528,14 +569,16 @@ async def _arena_eliminer(chat_id: int, user_id: str, bot, from_duel: bool = Fal
     arena = ARENAS.get(chat_id)
     if not arena or user_id not in arena["joueurs"]:
         return
-    # Immunité auto (hors duel)
-    if not from_duel and db.has_badge(user_id, "🛡️ Immunité"):
+
+    is_finale = len(arena["joueurs"]) == 2  # immunité bloquée en finale
+
+    # Immunité : bloquée en duel ET en finale
+    if not from_duel and not is_finale and db.has_badge(user_id, "🛡️ Immunité"):
         db.remove_badge(user_id, "🛡️ Immunité")
         nom = arena["joueurs"][user_id]["name"]
         await bot.send_message(chat_id,
             f"🛡️ *Immunité activée !* *{nom}* échappe à l'élimination !",
             parse_mode="Markdown")
-        # Éliminer le 2e pire à la place
         autres = [(uid, j["pts"]) for uid, j in arena["joueurs"].items() if uid != user_id]
         if autres:
             autres.sort(key=lambda x: x[1])
@@ -547,20 +590,11 @@ async def _arena_eliminer(chat_id: int, user_id: str, bot, from_duel: bool = Fal
     del arena["joueurs"][user_id]
 
     if len(arena["joueurs"]) == 1:
-        deux_joueurs = len(arena["elimines"]) == 1  # seulement 1 éliminé = duel 1v1
-        if not deux_joueurs and arena["mise"] > 0:
-            # 3+ joueurs : Option C — finaliste récupère sa mise (retirée du pot)
-            arena["pot"] -= arena["mise"]
-            db.ajuster_pts_brut(user_id, arena["mise"])
+        # Winner takes all — pas de remboursement finaliste
         db.add_badges(user_id, ["🗡️ Finaliste"])
-        if deux_joueurs:
-            await bot.send_message(chat_id,
-                f"🗡️ *{nom}* est éliminé(e) — *Finaliste !* Badge 🗡️ décerné.",
-                parse_mode="Markdown")
-        else:
-            await bot.send_message(chat_id,
-                f"🗡️ *{nom}* est éliminé(e) — *Finaliste !* Mise remboursée + badge 🗡️",
-                parse_mode="Markdown")
+        await bot.send_message(chat_id,
+            f"🗡️ *{nom}* est éliminé(e) — *Finaliste !* Badge 🗡️ décerné.",
+            parse_mode="Markdown")
         await asyncio.sleep(2)
         await _arena_end(chat_id, bot)
     else:
@@ -568,6 +602,16 @@ async def _arena_eliminer(chat_id: int, user_id: str, bot, from_duel: bool = Fal
             f"💀 *{nom}* est éliminé(e) ! Il reste *{len(arena['joueurs'])}* joueur(s).",
             parse_mode="Markdown")
         if chain:
+            # Reset de la phase pour les joueurs restants
+            arena["manche_phase"] = 0
+            arena["manche_phase_max"] = 3 if len(arena["joueurs"]) == 2 else 5
+            for uid in arena["joueurs"]:
+                arena["joueurs"][uid]["pts"] = 0
+            nb = arena["manche_phase_max"]
+            phase_label = "Finale" if nb == 3 else f"Phase suivante"
+            await bot.send_message(chat_id,
+                f"🔄 *{phase_label}* — {nb} manches avant la prochaine élimination.",
+                parse_mode="Markdown")
             await asyncio.sleep(3)
             if chat_id in ARENAS:
                 await _arena_start_round(chat_id, bot)
