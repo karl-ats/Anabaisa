@@ -413,6 +413,22 @@ def reset_hebdo():
         conn.execute("UPDATE joueurs SET pts_hebdo = 0")
         conn.execute("UPDATE hebdo_reset SET last_reset = CURRENT_TIMESTAMP WHERE id = 1")
 
+# ── Points bruts (arène) ─────────────────────────────────────────
+def ajuster_pts_brut(user_id: str, delta: int) -> bool:
+    """Ajoute/retire des pts sans toucher victoires/serie. Retourne False si solde insuffisant."""
+    with get_conn() as conn:
+        if delta < 0:
+            row = conn.execute("SELECT pts_alltime FROM joueurs WHERE user_id = ?", (user_id,)).fetchone()
+            if not row or row["pts_alltime"] < abs(delta):
+                return False
+        conn.execute("""
+            UPDATE joueurs SET
+                pts_alltime = MAX(0, pts_alltime + ?),
+                pts_hebdo   = MAX(0, pts_hebdo   + ?)
+            WHERE user_id = ?
+        """, (delta, delta, user_id))
+    return True
+
 # ── Admin ────────────────────────────────────────────────────────
 def retirer_points_joueur(nom: str, montant: int) -> dict:
     with get_conn() as conn:

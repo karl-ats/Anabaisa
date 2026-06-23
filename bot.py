@@ -166,6 +166,9 @@ async def cmd_indice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_solution(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    if g.arena_actif(chat_id):
+        await update.message.reply_text("⚠️ Une arène est en cours — /solution n'est pas disponible.")
+        return
     info = await g.stop_game(chat_id)
     if info is None:
         await update.message.reply_text("❌ Aucune partie en cours.")
@@ -177,6 +180,9 @@ async def cmd_solution(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    if g.arena_actif(chat_id):
+        await update.message.reply_text("⚠️ Une arène est en cours — /stop n'est pas disponible.")
+        return
     info = await g.stop_game(chat_id)
     if info is None:
         await update.message.reply_text("❌ Aucune partie en cours.")
@@ -265,6 +271,71 @@ async def cmd_profil(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ),
         parse_mode="Markdown"
     )
+
+# ── Arène ────────────────────────────────────────────────────────
+async def cmd_arene(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_id, user_name = user_info(update)
+    sched.register_chat(chat_id)
+    if await guard_pause(update): return
+
+    args = context.args
+    if not args or args[0].lower() not in ("easy", "medium", "hard"):
+        await update.message.reply_text(
+            "🏟️ *Usage :* `/arene easy|medium|hard <mise>`\n\n"
+            "Ex : `/arene hard 20` — chaque joueur mise 20 pts\n"
+            "Ex : `/arene easy` — gratuit\n\n"
+            "🏆 *Prix :* Le gagnant empoche tout le pot.\n"
+            "🗡️ Le finaliste récupère sa mise.",
+            parse_mode="Markdown"
+        )
+        return
+
+    difficulte = args[0].lower()
+    mise = 0
+    if len(args) >= 2:
+        try:
+            mise = int(args[1])
+            if mise < 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text("❌ La mise doit être un entier positif (ou absent pour 0).")
+            return
+
+    status = await g.start_arena(chat_id, difficulte, mise, user_id, user_name, context.bot)
+
+    if status == "already_active":
+        await update.message.reply_text("⚠️ Une arène ou une partie est déjà en cours ici !")
+    elif status == "no_pts":
+        await update.message.reply_text(f"❌ Tu n'as pas assez de points pour lancer cette arène (mise : {mise} pts).")
+    else:
+        await update.message.reply_text(
+            msg.msg_arena_ouverture(difficulte, mise, user_name),
+            parse_mode="Markdown"
+        )
+
+async def cmd_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_id, user_name = user_info(update)
+
+    status = await g.join_arena(chat_id, user_id, user_name)
+
+    if status == "no_arena":
+        await update.message.reply_text("❌ Aucune arène ouverte ici. Lance-en une avec /arene !")
+    elif status == "closed":
+        await update.message.reply_text("❌ L'arène a déjà commencé, plus d'inscription possible.")
+    elif status == "already":
+        await update.message.reply_text("✅ Tu es déjà inscrit(e) à l'arène !")
+    elif status == "no_pts":
+        mise = g.ARENAS[chat_id]["mise"]
+        await update.message.reply_text(f"❌ Tu n'as pas assez de points (mise requise : {mise} pts).")
+    else:
+        arena = g.ARENAS[chat_id]
+        nb = len(arena["joueurs"])
+        await update.message.reply_text(
+            msg.msg_arena_joueur_rejoint(user_name, nb, arena["mise"]),
+            parse_mode="Markdown"
+        )
 
 # ── Helpers mention/reply ────────────────────────────────────────
 def resolve_target(update: Update, context) -> str | None:
@@ -400,29 +471,31 @@ async def cmd_prolongation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 RELEASE_MESSAGE = """🆕 *Ana s'est mis à jour !*
 
-🏆 *Classements par groupe*
-/topscore et /topwin sont filtrés par groupe + ton rang personnel s'affiche en bas.
+🏟️ *NOUVEAU : Mode Arène*
+Un tournoi par élimination avec mise ! Chaque manche, le joueur avec le moins de points risque d'être éliminé. Égalité = mort subite.
+
+/arene easy|medium|hard <mise> — lancer une arène
+/join — rejoindre une arène ouverte
+
+🏆 *Prix :* le gagnant empoche tout le pot · le finaliste récupère sa mise.
 
 🎖️ *Nouveaux badges*
-💥 Doubleur — 7 victoires d'affilée : double tes pts sur le prochain mot
-🔄 Renaissance — 15 d'affilée : survit à une défaite (série repart à 1)
+💥 Doubleur — 7 victoires d'affilée : double tes pts
+🔄 Renaissance — 15 d'affilée : survit à une défaite
 🛡️ Bouclier — tous les 25 victoires : bloque un Sabotage
-⏱️ Prolongation — vainqueur de tournoi : +30s sur la partie
-👑 Prestige — champion de la semaine : transfère 30 pts à qui tu veux
+⏱️ Prolongation — vainqueur de tournoi : +30s
+👑 Prestige — champion de la semaine : transfère 30 pts
+🛡️ Immunité — survivre à un duel d'arène : protège d'une élimination
+🗡️ Finaliste — atteindre la finale d'arène
+🏟️ Gladiateur — remporter une arène
+💰 Parieur — participer à une arène avec mise
 
 Les badges en double s'affichent *Saboteur x2* dans ton /profil.
 
-📌 *Nouvelles commandes*
-/topscore — classement all-time points
-/topwin — classement all-time victoires
-/profil @nom — profil d'un autre joueur (ou réponds à son message)
-/sabotage — réponds au message de ta cible pour l'utiliser
-/prestige — réponds au message de ta cible pour l'utiliser
-/prolongation — prolonger la partie active
-
-💡 *Corrections*
-La série se remet à zéro correctement quand quelqu'un d'autre gagne.
-/indice ne déclenche plus les indices automatiques en double.
+📌 *Autres nouveautés*
+/topscore et /topwin filtrés par groupe + ton rang
+/profil, /sabotage, /prestige : réponds au message de quelqu'un pour le cibler
+La série se réinitialise correctement quand quelqu'un d'autre gagne.
 
 Bonne chance ! 😏"""
 
@@ -641,9 +714,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if BOT_EN_PAUSE:
         return
-    chat_id   = update.effective_chat.id
+    chat_id        = update.effective_chat.id
     user_id, user_name = user_info(update)
-    texte     = update.message.text
+    texte          = update.message.text
+    if await g.check_arena_answer(chat_id, user_id, user_name, texte, context.bot):
+        return
     await g.check_answer(chat_id, user_id, user_name, texte, context.bot)
 
 # ── Main ─────────────────────────────────────────────────────────
@@ -661,7 +736,9 @@ def main():
     app.add_handler(CommandHandler("indice",       cmd_indice))
     app.add_handler(CommandHandler("solution",     cmd_solution))
     app.add_handler(CommandHandler("stop",         cmd_stop))
-    app.add_handler(CommandHandler("topscore",     cmd_topscore))
+    app.add_handler(CommandHandler("arene",         cmd_arene))
+    app.add_handler(CommandHandler("join",          cmd_join))
+    app.add_handler(CommandHandler("topscore",      cmd_topscore))
     app.add_handler(CommandHandler("topwin",       cmd_topwin))
     app.add_handler(CommandHandler("profil",       cmd_profil))
     app.add_handler(CommandHandler("sabotage",     cmd_sabotage))

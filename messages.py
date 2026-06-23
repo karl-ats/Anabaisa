@@ -221,6 +221,71 @@ def msg_level_up(prenom: str, nouveau_niveau: str) -> str:
         f"Continue comme ça !"
     )
 
+# ── Arène ─────────────────────────────────────────────────────────
+def msg_arena_ouverture(difficulte: str, mise: int, organisateur: str) -> str:
+    labels = {"easy": "😊 Facile", "medium": "🔥 Moyen", "hard": "💀 Difficile"}
+    mise_txt = f"💰 Mise : *{mise} pts* par joueur" if mise > 0 else "🎮 *Gratuit*"
+    return (
+        f"🏟️ *ARÈNE {labels[difficulte].upper()} !*\n\n"
+        f"⚔️ *{organisateur}* ouvre l'arène !\n"
+        f"{mise_txt}\n\n"
+        f"Tapez /join pour entrer ! *(30 secondes)*\n"
+        f"_Minimum 2 joueurs pour démarrer._"
+    )
+
+def msg_arena_joueur_rejoint(name: str, nb: int, mise: int) -> str:
+    mise_txt = f" (-{mise} pts)" if mise > 0 else ""
+    return f"⚔️ *{name}* entre dans l'arène{mise_txt} ! ({nb} inscrit(s))"
+
+def msg_arena_start(nb_joueurs: int, difficulte: str, pot: int, mise: int) -> str:
+    labels = {"easy": "😊 Facile", "medium": "🔥 Moyen", "hard": "💀 Difficile"}
+    pot_txt = f"💰 Pot total : *{pot} pts*" if pot > 0 else "🎮 Sans mise"
+    return (
+        f"🏟️ *L'ARÈNE COMMENCE !*\n\n"
+        f"⚔️ *{nb_joueurs} gladiateurs* entrent en lice !\n"
+        f"🔥 Difficulté : {labels[difficulte]}\n"
+        f"{pot_txt}\n\n"
+        f"Le joueur avec le moins de points risque l'élimination à chaque manche.\n"
+        f"Égalité → mort subite !\n\n"
+        f"_Que le meilleur gagne !_ 🗡️"
+    )
+
+def msg_arena_manche(num: int, anagramme: str, difficulte: str, nb_lettres: int, joueurs: dict) -> str:
+    labels = {"easy": "😊 Facile", "medium": "🔥 Moyen", "hard": "💀 Difficile"}
+    pts = POINTS[difficulte]
+    scores_sorted = sorted(joueurs.items(), key=lambda x: x[1]["pts"], reverse=True)
+    scores_str = "  |  ".join(f"{j['name']} *{j['pts']}pt*" for _, j in scores_sorted)
+    return (
+        f"⚔️ *Manche {num}*\n\n"
+        f"➡️  *{anagramme.upper()}*\n\n"
+        f"📏 {nb_lettres} lettres · {labels[difficulte]} · *{pts} pt{'s' if pts > 1 else ''}*\n\n"
+        f"📊 {scores_str}"
+    )
+
+def msg_arena_duel(noms: list, anagramme: str, difficulte: str, nb_lettres: int) -> str:
+    labels = {"easy": "😊 Facile", "medium": "🔥 Moyen", "hard": "💀 Difficile"}
+    pts = POINTS[difficulte]
+    vs = " ⚔️ ".join(f"*{n}*" for n in noms)
+    return (
+        f"💀 *MORT SUBITE !*\n\n"
+        f"{vs}\n\n"
+        f"➡️  *{anagramme.upper()}*\n\n"
+        f"📏 {nb_lettres} lettres · {labels[difficulte]} · *{pts} pt{'s' if pts > 1 else ''}*\n\n"
+        f"_Le premier à répondre survit — le perdant est éliminé !_"
+    )
+
+def msg_arena_fin(gagnant_name: str, finaliste_name: str, pot: int, mise: int) -> str:
+    lines = [f"🏆 *ARÈNE TERMINÉE !*\n", f"👑 *Champion : {gagnant_name}*"]
+    if pot > 0:
+        lines.append(f"💰 Pot remporté : *{pot} pts*")
+    if mise > 0 and finaliste_name:
+        lines.append(f"🗡️ Finaliste : *{finaliste_name}* — mise remboursée")
+    lines.append(f"\n🎖️ *Badges distribués :*")
+    lines.append(f"🏟️ Gladiateur → {gagnant_name}")
+    if finaliste_name:
+        lines.append(f"🗡️ Finaliste → {finaliste_name}")
+    return "\n".join(lines)
+
 # ── Nouveau badge ────────────────────────────────────────────────
 def msg_nouveaux_badges(prenom: str, badges: list) -> str:
     s = "s" if len(badges) > 1 else ""

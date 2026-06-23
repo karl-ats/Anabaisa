@@ -64,6 +64,16 @@ def nettoyer(texte: str) -> str:
 
 # ── État global ──────────────────────────────────────────────────
 GAMES: dict = {}
+ARENAS: dict = {}
+# Structure ARENAS[chat_id] :
+# {
+#   "difficulte": str, "mise": int,
+#   "organisateur_id": str, "phase": "lobby"|"manche"|"duel"|"termine",
+#   "joueurs": {user_id: {"name": str, "pts": int}},
+#   "elimines": [(user_id, name)],   # du premier éliminé au finaliste
+#   "manche": int, "duel_mode": bool, "duel_joueurs": set,
+#   "pot": int, "lobby_task": Task|None,
+# }
 
 def _cancel_tasks_sync(chat_id: int):
     game = GAMES.get(chat_id, {})
@@ -169,9 +179,16 @@ async def _solution_task(chat_id: int, bot, delay: int = 60):
         if not t.done() and t is not current:
             t.cancel()
 
-    await bot.send_message(chat_id, msg.msg_solution(mot, "timeout", mode), parse_mode="Markdown")
+    if mode == "arena":
+        await bot.send_message(
+            chat_id,
+            f"⏰ *Temps écoulé !* Personne n'a trouvé... Le mot était *{mot.upper()}*",
+            parse_mode="Markdown"
+        )
+        await _arena_after_round(chat_id, bot, winner_id=None)
+        return
 
-    # Reset streak de tous les joueurs actifs du groupe (personne n'a gagné)
+    await bot.send_message(chat_id, msg.msg_solution(mot, "timeout", mode), parse_mode="Markdown")
     db.reset_streak_for_chat_losers(chat_id, "")
 
     if mode == "tournament":
@@ -355,6 +372,209 @@ async def _next_manche_or_end(chat_id: int, bot):
         if chat_id not in GAMES:
             return
         await _launch_manche(chat_id, difficulte, bot, manche + 1, scores)
+
+# ── Arène ────────────────────────────────────────────────────────
+async def start_arena(chat_id: int, difficulte: str, mise: int, org_id: str, org_name: str, bot) -> str:
+    if GAMES.get(chat_id, {}).get("actif"):
+        return "already_active"
+    if ARENAS.get(chat_id, {}).get("phase") in ("lobby", "manche", "duel"):
+        return "already_active"
+    if mise > 0 and not db.ajuster_pts_brut(org_id, -mise):
+        return "no_pts"
+    ARENAS[chat_id] = {
+        "difficulte": difficulte, "mise": mise,
+        "organisateur_id": org_id, "phase": "lobby",
+        "joueurs": {org_id: {"name": org_name, "pts": 0}},
+        "elimines": [], "manche": 0,
+        "duel_mode": False, "duel_joueurs": set(),
+        "pot": mise, "lobby_task": None,
+    }
+    loop = asyncio.get_running_loop()
+    ARENAS[chat_id]["lobby_task"] = loop.create_task(_arena_lobby_task(chat_id, bot))
+    return "ok"
+
+async def join_arena(chat_id: int, user_id: str, name: str) -> str:
+    arena = ARENAS.get(chat_id)
+    if not arena:
+        return "no_arena"
+    if arena["phase"] != "lobby":
+        return "closed"
+    if user_id in arena["joueurs"]:
+        return "already"
+    if arena["mise"] > 0 and not db.ajuster_pts_brut(user_id, -arena["mise"]):
+        return "no_pts"
+    arena["joueurs"][user_id] = {"name": name, "pts": 0}
+    arena["pot"] += arena["mise"]
+    return "ok"
+
+async def _arena_lobby_task(chat_id: int, bot):
+    await asyncio.sleep(30)
+    arena = ARENAS.get(chat_id)
+    if not arena or arena["phase"] != "lobby":
+        return
+    if len(arena["joueurs"]) < 2:
+        arena["phase"] = "termine"
+        for uid in arena["joueurs"]:
+            if arena["mise"] > 0:
+                db.ajuster_pts_brut(uid, arena["mise"])
+        await bot.send_message(chat_id,
+            "❌ *Arène annulée* — pas assez de joueurs (minimum 2).\n_Mises remboursées._",
+            parse_mode="Markdown")
+        ARENAS.pop(chat_id, None)
+        return
+    arena["phase"] = "manche"
+    nb  = len(arena["joueurs"])
+    pot = arena["pot"]
+    await bot.send_message(chat_id, msg.msg_arena_start(nb, arena["difficulte"], pot, arena["mise"]), parse_mode="Markdown")
+    await asyncio.sleep(3)
+    if chat_id in ARENAS:
+        await _arena_start_round(chat_id, bot)
+
+async def _arena_start_round(chat_id: int, bot):
+    arena = ARENAS.get(chat_id)
+    if not arena:
+        return
+    arena["manche"] += 1
+    mot, anag = await start_round(chat_id, arena["difficulte"], bot, mode="arena")
+    if arena["duel_mode"]:
+        noms = [arena["joueurs"][uid]["name"] for uid in arena["duel_joueurs"] if uid in arena["joueurs"]]
+        await bot.send_message(chat_id, msg.msg_arena_duel(noms, anag, arena["difficulte"], len(mot)), parse_mode="Markdown")
+    else:
+        await bot.send_message(chat_id, msg.msg_arena_manche(arena["manche"], anag, arena["difficulte"], len(mot), arena["joueurs"]), parse_mode="Markdown")
+    start_tasks(chat_id, bot)
+
+async def check_arena_answer(chat_id: int, user_id: str, user_name: str, texte: str, bot) -> bool:
+    arena = ARENAS.get(chat_id)
+    if not arena or arena["phase"] not in ("manche", "duel"):
+        return False
+    game = GAMES.get(chat_id)
+    if not game or not game.get("actif"):
+        return False
+    if arena["duel_mode"] and user_id not in arena["duel_joueurs"]:
+        return False
+    if not arena["duel_mode"] and user_id not in arena["joueurs"]:
+        return False
+    if nettoyer(texte) != nettoyer(game["mot"]):
+        return False
+
+    game["actif"] = False
+    _cancel_tasks_sync(chat_id)
+    elapsed = time.time() - game["start_time"]
+    pts = POINTS[arena["difficulte"]] + (1 if elapsed < BONUS_SPEED_SECONDS else 0)
+    arena["joueurs"][user_id]["pts"] += pts
+
+    if arena["duel_mode"]:
+        nom = arena["joueurs"][user_id]["name"]
+        await bot.send_message(chat_id,
+            f"⚔️ *{nom}* remporte le duel ! +{pts} pt(s)\n🛡️ Badge Immunité gagné !",
+            parse_mode="Markdown")
+        db.add_consumable_badge(user_id, "🛡️ Immunité")
+        perdants = [uid for uid in list(arena["duel_joueurs"]) if uid != user_id]
+        arena["duel_mode"] = False
+        arena["duel_joueurs"] = set()
+        for i, uid in enumerate(perdants):
+            await _arena_eliminer(chat_id, uid, bot, from_duel=True, chain=(i == len(perdants) - 1))
+            if chat_id not in ARENAS:
+                return True
+    else:
+        nom = arena["joueurs"][user_id]["name"]
+        await bot.send_message(chat_id,
+            f"🎯 *{nom}* remporte la manche ! +{pts} pt(s)",
+            parse_mode="Markdown")
+        await _arena_after_round(chat_id, bot, winner_id=user_id)
+    return True
+
+async def _arena_after_round(chat_id: int, bot, winner_id: str | None):
+    arena = ARENAS.get(chat_id)
+    if not arena:
+        return
+    joueurs = arena["joueurs"]
+    if len(joueurs) <= 1:
+        await _arena_end(chat_id, bot)
+        return
+    min_pts  = min(j["pts"] for j in joueurs.values())
+    perdants = [uid for uid, j in joueurs.items() if j["pts"] == min_pts]
+    if len(perdants) == len(joueurs):
+        # Tout le monde à égalité → rejouer sans élimination
+        await asyncio.sleep(2)
+        if chat_id in ARENAS:
+            await _arena_start_round(chat_id, bot)
+    elif len(perdants) == 1:
+        await _arena_eliminer(chat_id, perdants[0], bot)
+    else:
+        arena["duel_mode"] = True
+        arena["duel_joueurs"] = set(perdants)
+        noms = [joueurs[uid]["name"] for uid in perdants]
+        await bot.send_message(chat_id,
+            f"⚔️ Égalité entre {' et '.join('*'+n+'*' for n in noms)} — *mort subite !*",
+            parse_mode="Markdown")
+        await asyncio.sleep(3)
+        if chat_id in ARENAS:
+            await _arena_start_round(chat_id, bot)
+
+async def _arena_eliminer(chat_id: int, user_id: str, bot, from_duel: bool = False, chain: bool = True):
+    arena = ARENAS.get(chat_id)
+    if not arena or user_id not in arena["joueurs"]:
+        return
+    # Immunité auto (hors duel)
+    if not from_duel and db.has_badge(user_id, "🛡️ Immunité"):
+        db.remove_badge(user_id, "🛡️ Immunité")
+        nom = arena["joueurs"][user_id]["name"]
+        await bot.send_message(chat_id,
+            f"🛡️ *Immunité activée !* *{nom}* échappe à l'élimination !",
+            parse_mode="Markdown")
+        # Éliminer le 2e pire à la place
+        autres = [(uid, j["pts"]) for uid, j in arena["joueurs"].items() if uid != user_id]
+        if autres:
+            autres.sort(key=lambda x: x[1])
+            await _arena_eliminer(chat_id, autres[0][0], bot, from_duel=False, chain=chain)
+        return
+
+    nom = arena["joueurs"][user_id]["name"]
+    arena["elimines"].append((user_id, nom))
+    del arena["joueurs"][user_id]
+
+    if len(arena["joueurs"]) == 1:
+        # Celui qu'on vient d'éliminer = finaliste
+        if arena["mise"] > 0:
+            db.ajuster_pts_brut(user_id, arena["mise"])
+        db.add_badges(user_id, ["🗡️ Finaliste"])
+        await bot.send_message(chat_id,
+            f"🗡️ *{nom}* est éliminé(e) — *Finaliste !* Mise remboursée + badge 🗡️",
+            parse_mode="Markdown")
+        await asyncio.sleep(2)
+        await _arena_end(chat_id, bot)
+    else:
+        await bot.send_message(chat_id,
+            f"💀 *{nom}* est éliminé(e) ! Il reste *{len(arena['joueurs'])}* joueur(s).",
+            parse_mode="Markdown")
+        if chain:
+            await asyncio.sleep(3)
+            if chat_id in ARENAS:
+                await _arena_start_round(chat_id, bot)
+
+async def _arena_end(chat_id: int, bot):
+    arena = ARENAS.get(chat_id)
+    if not arena or not arena["joueurs"]:
+        ARENAS.pop(chat_id, None)
+        return
+    winner_id   = list(arena["joueurs"].keys())[0]
+    winner_name = arena["joueurs"][winner_id]["name"]
+    pot         = arena["pot"]
+    finaliste   = arena["elimines"][-1][1] if arena["elimines"] else ""
+    if pot > 0:
+        db.ajuster_pts_brut(winner_id, pot)
+    db.add_badges(winner_id, ["🏟️ Gladiateur"])
+    if arena["mise"] > 0:
+        tous = [winner_id] + [uid for uid, _ in arena["elimines"]]
+        for uid in tous:
+            db.add_badges(uid, ["💰 Parieur"])
+    await bot.send_message(chat_id, msg.msg_arena_fin(winner_name, finaliste, pot, arena["mise"]), parse_mode="Markdown")
+    ARENAS.pop(chat_id, None)
+    GAMES.pop(chat_id, None)
+
+def arena_actif(chat_id: int) -> bool:
+    return chat_id in ARENAS
 
 # ── Stop ─────────────────────────────────────────────────────────
 async def stop_game(chat_id: int) -> dict | None:
